@@ -18,7 +18,10 @@ extern "C" void *__dlapi_open(const char *, int, void *);
 extern "C" void *__dlapi_resolve(void *, const char *, void *, const char *);
 extern "C" int __dlapi_reverse(const void *, __dlapi_symbol *);
 extern "C" int __dlapi_close(void *);
+// After:
+#if __MLIBC_GLIBC_OPTION
 extern "C" int __dlapi_find_object(void *__address, dl_find_object *__result);
+#endif
 
 int dlclose(void *handle) {
 	return __dlapi_close(handle);

@@ -29,20 +29,23 @@ extern "C" int main(int argc, char **argv);
 
 static uint8_t tls_storage[TLS_SIZE + sizeof(Tcb)];
 
+// Reference the RTLD's entryStack directly
+extern uintptr_t *entryStack;
+
 extern "C" void __mlibc_start_main(uintptr_t *sp) {
-    // Set up TLS/TCB
+    // Set the RTLD's entryStack so __dlapi_entrystack() returns correctly
+    entryStack = sp;
+
     memset(tls_storage, 0, sizeof(tls_storage));
     Tcb *tcb = reinterpret_cast<Tcb*>(tls_storage + TLS_SIZE);
     tcb->selfPointer = tcb;
     mlibc::sys_tcb_set(tcb);
 
-    // Run constructors (parse_exec_stack runs here, needs valid stack)
     extern void (*__CTOR_LIST__[])();
     extern void (*__CTOR_END__[])();
     for (void (**ctor)() = __CTOR_LIST__; ctor < __CTOR_END__; ctor++)
         (*ctor)();
 
-    // Parse argc/argv from initial stack
     int argc = (int)*sp;
     char **argv = (char**)(sp + 1);
 
@@ -137,9 +140,7 @@ int sys_read(int fd, void *buf, size_t count, ssize_t *bytes_read) {
 
 int sys_write(int fd, const void *buf, size_t count, ssize_t *bytes_written) {
     long ret = syscall3(SYS_WRITE, fd, (long)buf, count);
-    if (ret < 0) {
-        return -ret;
-    }
+    if (ret < 0) return -ret;
     *bytes_written = ret;
     return 0;
 }
@@ -159,6 +160,8 @@ int sys_close(int fd) {
 }
 
 int sys_seek(int fd, off_t offset, int whence, off_t *new_offset) {
+    if (fd == 0 || fd == 1 || fd == 2)
+        return ESPIPE;  // not seekable — tells mlibc to treat as pipe_like
     return ENOSYS;
 }
 
@@ -189,7 +192,11 @@ int sys_clock_get(int clock, time_t *secs, long *nanos) {
 }
 
 int sys_ioctl(int fd, unsigned long request, void *arg, int *result) {
-    (void)fd; (void)request; (void)arg; (void)result;
+    syscall3(SYS_WRITE, 1, (long)"[ioctl]\n", 8);  // raw syscall bypass
+    (void)request; (void)arg;
+    if (result) *result = 0;
+    if (fd == 0 || fd == 1 || fd == 2)
+        return 0;
     return ENOSYS;
 }
 
@@ -197,7 +204,7 @@ int sys_ioctl(int fd, unsigned long request, void *arg, int *result) {
 
 int sys_isatty(int fd) {
     if (fd == 0 || fd == 1 || fd == 2)
-        return 0; // 0 = yes, it is a tty
+        return 0;
     return ENOTTY;
 }
 

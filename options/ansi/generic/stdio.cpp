@@ -328,6 +328,7 @@ int fscanf(FILE *__restrict stream, const char *__restrict format, ...) {
 }
 
 int printf(const char *__restrict format, ...) {
+	mlibc::sys_libc_log("[mlibc] printf called\n");  // add this
 	va_list args;
 	va_start(args, format);
 	int result = vfprintf(stdout, format, args);

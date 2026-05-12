@@ -111,6 +111,21 @@ void sys_exit(int status) {
     while (1);
 }
 
+int sys_sleep(time_t *secs, long *nanos) {
+    long ret = syscall2(SYS_SLEEP, *secs, nanos ? *nanos : 0);
+    if (ret < 0) {
+        return -ret;
+    }
+    
+    // We don't support early wakeups from signals yet,
+    // so we assume the full duration elapsed.
+    *secs = 0;
+    if (nanos)
+        *nanos = 0;
+        
+    return 0;
+}
+
 // --- Basic I/O ---
 
 int sys_read(int fd, void *buf, size_t count, ssize_t *bytes_read) {

@@ -29,27 +29,31 @@ extern "C" int main(int argc, char **argv);
 
 static uint8_t tls_storage[TLS_SIZE + sizeof(Tcb)];
 
-// Reference the RTLD's entryStack directly
-extern uintptr_t *entryStack;
+// // Reference the RTLD's entryStack directly
+// extern uintptr_t *entryStack;
+extern "C" void __dlapi_enter(uintptr_t *);
 
 extern "C" void __mlibc_start_main(uintptr_t *sp) {
-    // Set the RTLD's entryStack so __dlapi_entrystack() returns correctly
-    entryStack = sp;
+    // Set the RTLD's entryStack so __dlapi_entrystack() returns correctly3
+    mlibc::sys_write(1, "[generic.cpp] reached __mlibc_start_main\n", 41 );
+    uintptr_t* entryStack = sp;
+    __dlapi_enter(entryStack);
+
 
     memset(tls_storage, 0, sizeof(tls_storage));
     Tcb *tcb = reinterpret_cast<Tcb*>(tls_storage + TLS_SIZE);
     tcb->selfPointer = tcb;
     mlibc::sys_tcb_set(tcb);
 
-    extern void (*__CTOR_LIST__[])();
-    extern void (*__CTOR_END__[])();
-    for (void (**ctor)() = __CTOR_LIST__; ctor < __CTOR_END__; ctor++)
-        (*ctor)();
+    // extern void (*__CTOR_LIST__[])();
+    // extern void (*__CTOR_END__[])();
+    // for (void (**ctor)() = __CTOR_LIST__; ctor < __CTOR_END__; ctor++)
+    //     (*ctor)();
 
     int argc = (int)*sp;
     char **argv = (char**)(sp + 1);
 
-    int ret = main(argc, argv);
+    auto ret = main(argc, argv);
     mlibc::sys_exit(ret);
     __builtin_unreachable();
 }

@@ -18,6 +18,7 @@
 #define SYS_ANON_FREE   5
 #define SYS_TCB_SET     6   /* set FS base for TLS (mlibc sys_tcb_set) */
 #define SYS_EXIT        7   /* terminate current process */
+#define SYS_FORK        8
 
 
 extern "C" int main(int argc, char **argv);
@@ -109,6 +110,13 @@ int sys_tcb_set(void *pointer) {
 void sys_exit(int status) {
     syscall1(SYS_EXIT, status);
     while (1);
+}
+
+int sys_fork(pid_t *child) {
+    long ret = syscall1(SYS_FORK, 0);
+    if (ret < 0) return -ret;
+    *child = ret;
+    return 0;
 }
 
 int sys_sleep(time_t *secs, long *nanos) {

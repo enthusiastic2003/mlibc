@@ -93,14 +93,6 @@ static void init_locale() {
 
 char *setlocale(int category, const char *name) {
 	if(category == LC_ALL) {
-		// ´TODO: Implement correct return value when categories differ.
-		auto current_desc = mlibc::collate_facet;
-		__ensure(current_desc == mlibc::ctype_facet);
-		__ensure(current_desc == mlibc::monetary_facet);
-		__ensure(current_desc == mlibc::numeric_facet);
-		__ensure(current_desc == mlibc::time_facet);
-		__ensure(current_desc == mlibc::messages_facet);
-
 		if(name) {
 			// Our default C locale is the C locale.
 			if(!strlen(name))
@@ -119,9 +111,28 @@ char *setlocale(int category, const char *name) {
 			mlibc::numeric_facet = new_desc;
 			mlibc::time_facet = new_desc;
 			mlibc::messages_facet = new_desc;
-			current_desc = new_desc;       // POSIX: report the locale now in effect
+			return const_cast<char *>(new_desc->name);   // POSIX: the locale now in effect
 		}
-		return const_cast<char *>(current_desc->name);
+		auto first = mlibc::collate_facet;
+		if(first == mlibc::ctype_facet && first == mlibc::monetary_facet
+				&& first == mlibc::numeric_facet && first == mlibc::time_facet
+				&& first == mlibc::messages_facet)
+			return const_cast<char *>(first->name);
+		// The categories differ (a program switched only LC_CTYPE): report them
+		// all, the way glibc does.
+		static char composite[256];
+		composite[0] = '\0';
+		auto append = [](const char *label, const mlibc::locale_description *d) {
+			strcat(composite, label);
+			strcat(composite, d->name);
+		};
+		append("LC_CTYPE=", mlibc::ctype_facet);
+		append(";LC_NUMERIC=", mlibc::numeric_facet);
+		append(";LC_TIME=", mlibc::time_facet);
+		append(";LC_COLLATE=", mlibc::collate_facet);
+		append(";LC_MONETARY=", mlibc::monetary_facet);
+		append(";LC_MESSAGES=", mlibc::messages_facet);
+		return composite;
 	}else{
 		const mlibc::locale_description **facet_ptr;
 		switch(category) {

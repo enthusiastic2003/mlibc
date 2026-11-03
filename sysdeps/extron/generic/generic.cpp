@@ -13,6 +13,10 @@
 #include <stdlib.h>            // exit() — the real termination path, see __mlibc_start_main
 #include <unistd.h>
 #include <sys/resource.h>
+#include <sys/times.h>
+#include <sys/wait.h>
+#include <sys/uio.h>
+#include <sys/time.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <mlibc/elf/startup.h> // mlibc::entry_stack — argc/argv, parsed by __dlapi_enter()
@@ -114,6 +118,10 @@
 #define SYS_PATHCONF    84
 #define SYS_PREAD       85
 #define SYS_PWRITE      86
+#define SYS_FTRUNCATE   87
+#define SYS_FSYNC       88
+#define SYS_GETRANDOM   89
+#define SYS_YIELD       90
 
 
 using main_fn = int (*)(int, char **);
@@ -680,6 +688,124 @@ int sys_pread(int fd, void *buf, size_t count, off_t offset, ssize_t *bytes_read
     long ret = cp_syscall4(SYS_PREAD, fd, (long)buf, count, offset);
     if (ret < 0) return -ret;
     *bytes_read = ret;
+    return 0;
+}
+
+int sys_readv(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
+    ssize_t total = 0;
+    for (int i = 0; i < iovc; i++) {
+        if (!iovs[i].iov_len) continue;
+        ssize_t n = 0;
+        int e = sys_read(fd, iovs[i].iov_base, iovs[i].iov_len, &n);
+        if (e) {
+            if (total) break;
+            return e;
+        }
+        total += n;
+        if (static_cast<size_t>(n) < iovs[i].iov_len) break;   // short read / EOF
+    }
+    *bytes_read = total;
+    return 0;
+}
+
+int sys_writev(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
+    ssize_t total = 0;
+    for (int i = 0; i < iovc; i++) {
+        if (!iovs[i].iov_len) continue;
+        ssize_t n = 0;
+        int e = sys_write(fd, iovs[i].iov_base, iovs[i].iov_len, &n);
+        if (e) {
+            if (total) break;
+            return e;
+        }
+        total += n;
+        if (static_cast<size_t>(n) < iovs[i].iov_len) break;
+    }
+    *bytes_written = total;
+    return 0;
+}
+
+int sys_ftruncate(int fd, size_t size) {
+    long ret = syscall2(SYS_FTRUNCATE, fd, static_cast<long>(size));
+    return ret < 0 ? static_cast<int>(-ret) : 0;
+}
+
+int sys_fsync(int fd) {
+    long ret = syscall1(SYS_FSYNC, fd);
+    return ret < 0 ? static_cast<int>(-ret) : 0;
+}
+int sys_fdatasync(int fd) { return sys_fsync(fd); }
+void sys_sync() {}
+
+void sys_yield() { syscall0(SYS_YIELD); }
+
+int sys_getentropy(void *buffer, size_t length) {
+    auto *p = static_cast<char *>(buffer);
+    while (length) {
+        size_t n = length > 256 ? 256 : length;
+        long ret = syscall3(SYS_GETRANDOM, reinterpret_cast<long>(p), n, 0);
+        if (ret < 0) return static_cast<int>(-ret);
+        p += n; length -= n;
+    }
+    return 0;
+}
+
+int sys_clock_getres(int clock, time_t *secs, long *nanos) {
+    // CLOCK_REALTIME / CLOCK_MONOTONIC are TSC-derived, so nanosecond-granular.
+    if (clock != 0 && clock != 1) return EINVAL;
+    *secs = 0;
+    *nanos = 1;
+    return 0;
+}
+
+// _SC_CLK_TCK is reported by mlibc as 1000000, so tms/clock_t are microseconds.
+int sys_times(struct tms *tms, clock_t *out) {
+    auto us = [](const struct timeval &tv) -> clock_t {
+        return static_cast<clock_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
+    };
+    struct rusage self{}, kids{};
+    int e = sys_getrusage(RUSAGE_SELF, &self);
+    if (!e) e = sys_getrusage(RUSAGE_CHILDREN, &kids);
+    if (e) return e;
+    if (tms) {
+        tms->tms_utime = us(self.ru_utime);
+        tms->tms_stime = us(self.ru_stime);
+        tms->tms_cutime = us(kids.ru_utime);
+        tms->tms_cstime = us(kids.ru_stime);
+    }
+    long ms = syscall0(SYS_UPTIME_MS);
+    *out = static_cast<clock_t>(ms) * 1000;
+    return 0;
+}
+
+int sys_madvise(void *, size_t, int) { return 0; }   // advice only; no behaviour to change
+
+int sys_waitid(idtype_t idtype, id_t id, siginfo_t *info, int options) {
+    if (!(options & WEXITED)) return EINVAL;
+    if (options & WNOWAIT) return ENOSYS;
+    pid_t target;
+    switch (idtype) {
+        case P_ALL:  target = -1; break;
+        case P_PID:  target = static_cast<pid_t>(id); break;
+        case P_PGID: target = id ? -static_cast<pid_t>(id) : 0; break;
+        default: return EINVAL;
+    }
+    int status = 0;
+    pid_t reaped = 0;
+    int e = sys_waitpid(target, &status, options & WNOHANG, nullptr, &reaped);
+    if (e) return e;
+    memset(info, 0, sizeof(*info));
+    if (reaped > 0) {
+        info->si_signo = SIGCHLD;
+        info->si_pid = reaped;
+        if (WIFEXITED(status)) {
+            info->si_code = CLD_EXITED;
+            info->si_status = WEXITSTATUS(status);
+        } else {
+            info->si_code = WCOREDUMP(status) ? CLD_DUMPED : CLD_KILLED;
+            info->si_status = WTERMSIG(status);
+        }
+    }
     return 0;
 }
 

@@ -1503,6 +1503,21 @@ int sys_thread_getname(void *tcb, char *name, size_t size) {
     return 0;
 }
 
+// Extended attributes: the filesystems here have none. EOPNOTSUPP is what
+// callers such as Python's shutil.copystat() expect and ignore.
+int sys_listxattr(const char *, char *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_llistxattr(const char *, char *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_flistxattr(int, char *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_getxattr(const char *, const char *, void *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_lgetxattr(const char *, const char *, void *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_fgetxattr(int, const char *, void *, size_t, ssize_t *) { return EOPNOTSUPP; }
+int sys_setxattr(const char *, const char *, const void *, size_t, int) { return EOPNOTSUPP; }
+int sys_lsetxattr(const char *, const char *, const void *, size_t, int) { return EOPNOTSUPP; }
+int sys_fsetxattr(int, const char *, const void *, size_t, int) { return EOPNOTSUPP; }
+int sys_removexattr(const char *, const char *) { return EOPNOTSUPP; }
+int sys_lremovexattr(const char *, const char *) { return EOPNOTSUPP; }
+int sys_fremovexattr(int, const char *) { return EOPNOTSUPP; }
+
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

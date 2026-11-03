@@ -453,10 +453,21 @@ size_t strftime(char *__restrict dest, size_t max_size,
 	return (p - dest);
 }
 
-size_t wcsftime(wchar_t *__restrict, size_t, const wchar_t *__restrict,
-		const struct tm *__restrict) {
-	mlibc::infoLogger() << "mlibc: wcsftime is a stub" << frg::endlog;
-	return 0;
+size_t wcsftime(wchar_t *__restrict s, size_t max, const wchar_t *__restrict fmt,
+		const struct tm *__restrict tm) {
+	// Format with strftime() and widen the result.
+	char nfmt[256], out[1024];
+	size_t n = wcstombs(nfmt, fmt, sizeof(nfmt));
+	if(n == (size_t)-1 || n >= sizeof(nfmt))
+		return 0;
+	size_t m = strftime(out, sizeof(out), nfmt, tm);
+	if(!m)
+		return 0;
+	out[m] = '\0';
+	size_t w = mbstowcs(s, out, max);
+	if(w == (size_t)-1 || w >= max)
+		return 0;
+	return w;
 }
 
 namespace {
@@ -961,10 +972,34 @@ int clock_gettime(clockid_t clock, struct timespec *time) {
 	return 0;
 }
 
-int clock_nanosleep(clockid_t clockid, int, const struct timespec *req, struct timespec *) {
-	mlibc::infoLogger() << "clock_nanosleep is implemented as nanosleep!" << frg::endlog;
-	__ensure(clockid == CLOCK_REALTIME || clockid == CLOCK_MONOTONIC);
-	return nanosleep(req, nullptr);
+int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, struct timespec *rem) {
+	if(clockid != CLOCK_REALTIME && clockid != CLOCK_MONOTONIC)
+		return EINVAL;
+	if(req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L)
+		return EINVAL;
+	if(!(flags & TIMER_ABSTIME)) {
+		if(nanosleep(req, rem))
+			return errno;
+		return 0;
+	}
+	// Absolute deadline on `clockid`: sleep the remaining time, re-checking
+	// because nanosleep() may return early.
+	for(;;) {
+		struct timespec now;
+		if(clock_gettime(clockid, &now))
+			return errno;
+		struct timespec left;
+		left.tv_sec = req->tv_sec - now.tv_sec;
+		left.tv_nsec = req->tv_nsec - now.tv_nsec;
+		if(left.tv_nsec < 0) {
+			left.tv_sec--;
+			left.tv_nsec += 1000000000L;
+		}
+		if(left.tv_sec < 0)
+			return 0;
+		if(nanosleep(&left, nullptr) && errno == EINTR)
+			return EINTR;
+	}
 }
 
 int clock_settime(clockid_t clock, const struct timespec *time) {

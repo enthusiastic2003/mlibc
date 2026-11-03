@@ -106,15 +106,17 @@ namespace {
 			errno = ENAMETOOLONG;
 			return nullptr;
 		}
-		memcpy(buf, "/dev/shm/", 9);
-		memcpy(buf + 9, name, p - name + 1);
+		// There is no /dev/shm (devfs is read-only): shared-memory objects are
+		// files under /tmp.
+		memcpy(buf, "/tmp/.shm.", 10);
+		memcpy(buf + 10, name, p - name + 1);
 		return buf;
 	}
 } // namespace
 
 int shm_open(const char *name, int flags, mode_t mode) {
 	int cs;
-	char buf[NAME_MAX + 10];
+	char buf[NAME_MAX + 16];
 	if(!(name = shm_mapname(name, buf)))
 		return -1;
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
@@ -124,7 +126,7 @@ int shm_open(const char *name, int flags, mode_t mode) {
 }
 
 int shm_unlink(const char *name) {
-	char buf[NAME_MAX + 10];
+	char buf[NAME_MAX + 16];
 	if(!(name = shm_mapname(name, buf)))
 		return -1;
 	return unlink(name);

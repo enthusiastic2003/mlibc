@@ -120,6 +120,7 @@
 #define SYS_PREAD       85
 #define SYS_PWRITE      86
 #define SYS_FTRUNCATE   87
+#define SYS_REBOOT      71
 #define SYS_SIGALTSTACK 91
 #define SYS_SETITIMER   92
 #define SYS_GETITIMER   93
@@ -756,7 +757,12 @@ int sys_fsync(int fd) {
     return ret < 0 ? static_cast<int>(-ret) : 0;
 }
 int sys_fdatasync(int fd) { return sys_fsync(fd); }
-void sys_sync() {}
+void sys_sync() { syscall1(SYS_FSYNC, -1); }   // fd -1 = flush everything
+
+int sys_reboot(int cmd) {
+    long ret = syscall1(SYS_REBOOT, cmd);   // does not return on success
+    return ret < 0 ? static_cast<int>(-ret) : 0;
+}
 
 void sys_yield() { syscall0(SYS_YIELD); }
 

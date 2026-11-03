@@ -17,6 +17,8 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
@@ -141,6 +143,16 @@
 #define SYS_SENDMSG 108
 #define SYS_RECVMSG 109
 #define SYS_SOCKOPT 110
+#endif
+#ifndef SYS_EPOLL_CREATE
+#define SYS_EPOLL_CREATE 111
+#define SYS_EPOLL_CTL 112
+#define SYS_EPOLL_WAIT 113
+#define SYS_EVENTFD 114
+#define SYS_TIMERFD_CREATE 115
+#define SYS_TIMERFD_SETTIME 116
+#define SYS_TIMERFD_GETTIME 117
+#define SYS_SIGNALFD 118
 #endif
 #ifndef SYS_SIGSUSPEND
 #define SYS_SIGSUSPEND 94
@@ -1337,6 +1349,72 @@ int sys_setsockopt(int fd, int layer, int number, const void *buffer, socklen_t 
     sockopt_request r{layer, number, (uint64_t)buffer, (uint64_t)&l, 1};
     long ret = syscall2(SYS_SOCKOPT, fd, (long)&r);
     return ret < 0 ? -ret : 0;
+}
+
+// ---- epoll / eventfd / timerfd / signalfd ----
+int sys_epoll_create(int flags, int *fd) {
+    long ret = syscall1(SYS_EPOLL_CREATE, flags);
+    if (ret < 0) return -ret;
+    *fd = (int)ret;
+    return 0;
+}
+
+int sys_epoll_ctl(int epfd, int mode, int fd, struct epoll_event *ev) {
+    long ret = syscall4(SYS_EPOLL_CTL, epfd, mode, fd, (long)ev);
+    return ret < 0 ? -ret : 0;
+}
+
+struct epoll_wait_request {
+    uint64_t events;
+    int64_t maxevents;
+    int64_t timeout_ms;
+    uint64_t sigmask;
+    uint64_t has_mask;
+};
+
+int sys_epoll_pwait(int epfd, struct epoll_event *ev, int n, int timeout,
+                    const sigset_t *sigmask, int *raised) {
+    epoll_wait_request r{(uint64_t)ev, n, timeout < 0 ? -1 : timeout, 0, 0};
+    if (sigmask) {
+        r.sigmask = *(const uint64_t *)sigmask;
+        r.has_mask = 1;
+    }
+    long ret = cp_syscall3(SYS_EPOLL_WAIT, epfd, (long)&r, 0);
+    if (ret < 0) return -ret;
+    *raised = (int)ret;
+    return 0;
+}
+
+int sys_eventfd_create(unsigned int initval, int flags, int *fd) {
+    long ret = syscall2(SYS_EVENTFD, initval, flags);
+    if (ret < 0) return -ret;
+    *fd = (int)ret;
+    return 0;
+}
+
+int sys_timerfd_create(int clockid, int flags, int *fd) {
+    long ret = syscall2(SYS_TIMERFD_CREATE, clockid, flags);
+    if (ret < 0) return -ret;
+    *fd = (int)ret;
+    return 0;
+}
+
+int sys_timerfd_settime(int fd, int flags, const struct itimerspec *value,
+                        struct itimerspec *oldvalue) {
+    long ret = syscall4(SYS_TIMERFD_SETTIME, fd, flags, (long)value, (long)oldvalue);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_timerfd_gettime(int fd, struct itimerspec *its) {
+    long ret = syscall2(SYS_TIMERFD_GETTIME, fd, (long)its);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_signalfd_create(const sigset_t *mask, int flags, int *fd) {
+    long ret = syscall3(SYS_SIGNALFD, *fd, (long)mask, flags);
+    if (ret < 0) return -ret;
+    *fd = (int)ret;
+    return 0;
 }
 
 int sys_isatty(int fd) {

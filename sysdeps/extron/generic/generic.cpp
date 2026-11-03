@@ -120,6 +120,9 @@
 #define SYS_PREAD       85
 #define SYS_PWRITE      86
 #define SYS_FTRUNCATE   87
+#define SYS_SIGALTSTACK 91
+#define SYS_SETITIMER   92
+#define SYS_GETITIMER   93
 #define SYS_FSYNC       88
 #define SYS_GETRANDOM   89
 #define SYS_YIELD       90
@@ -724,6 +727,23 @@ int sys_writev(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_writte
     }
     *bytes_written = total;
     return 0;
+}
+
+int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
+    long ret = syscall2(SYS_SIGALTSTACK, reinterpret_cast<long>(ss),
+                        reinterpret_cast<long>(oss));
+    return ret < 0 ? static_cast<int>(-ret) : 0;
+}
+
+int sys_setitimer(int which, const struct itimerval *nv, struct itimerval *ov) {
+    long ret = syscall3(SYS_SETITIMER, which, reinterpret_cast<long>(nv),
+                        reinterpret_cast<long>(ov));
+    return ret < 0 ? static_cast<int>(-ret) : 0;
+}
+
+int sys_getitimer(int which, struct itimerval *cur) {
+    long ret = syscall2(SYS_GETITIMER, which, reinterpret_cast<long>(cur));
+    return ret < 0 ? static_cast<int>(-ret) : 0;
 }
 
 int sys_ftruncate(int fd, size_t size) {

@@ -1195,6 +1195,11 @@ frg::tuple<ObjectSymbol, SymbolVersion> SharedObject::getSymbolByIndex(size_t in
 		bool isDefault = !(verIdx & 0x8000);
 		verIdx &= 0x7FFF;
 
+		// Some linkers leave unversioned undefined symbols at index 0 (local);
+		// a reference cannot be local, so treat it as global.
+		if(verIdx == 0 && sym.symbol()->st_shndx == SHN_UNDEF)
+			verIdx = 1;
+
 		// 0 and 1 are special, 0 is local, 1 is global (not in VERDEF/VERNEED)
 		if(verIdx != 0 && verIdx != 1) {
 			auto maybeVer = knownVersions.find(verIdx);

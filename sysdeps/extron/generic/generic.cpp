@@ -1469,6 +1469,40 @@ int sys_tcflush(int fd, int queue) {
 
 int sys_tcdrain(int) { return 0; }      // writes are synchronous
 
+// Thread names (pthread_setname_np/getname_np). The kernel has no per-thread name
+// field, so they live in a small table in the process: enough for the library
+// calls that set a name for debugging (CPython's threading module does).
+namespace {
+struct thread_name_entry { void *tcb; char name[16]; };
+thread_name_entry thread_names[64];
+}
+
+int sys_thread_setname(void *tcb, const char *name) {
+    size_t n = 0;
+    while (name[n]) n++;
+    if (n > 15) return ERANGE;
+    thread_name_entry *slot = nullptr;
+    for (auto &e : thread_names) {
+        if (e.tcb == tcb) { slot = &e; break; }
+        if (!slot && !e.tcb) slot = &e;
+    }
+    if (!slot) return ENOMEM;
+    slot->tcb = tcb;
+    for (size_t i = 0; i <= n; i++) slot->name[i] = name[i];
+    return 0;
+}
+
+int sys_thread_getname(void *tcb, char *name, size_t size) {
+    const char *found = "";
+    for (auto &e : thread_names)
+        if (e.tcb == tcb) { found = e.name; break; }
+    size_t n = 0;
+    while (found[n]) n++;
+    if (n + 1 > size) return ERANGE;
+    for (size_t i = 0; i <= n; i++) name[i] = found[i];
+    return 0;
+}
+
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

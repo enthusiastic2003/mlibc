@@ -1518,6 +1518,38 @@ int sys_removexattr(const char *, const char *) { return EOPNOTSUPP; }
 int sys_lremovexattr(const char *, const char *) { return EOPNOTSUPP; }
 int sys_fremovexattr(int, const char *) { return EOPNOTSUPP; }
 
+// sendfile(2): no kernel support, so copy through a buffer in userspace. Same
+// contract: with `offset` the input is read with pread() from *offset (which is
+// advanced) and the file position is untouched.
+int sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count, ssize_t *out) {
+    char buf[16384];
+    ssize_t total = 0;
+    while (static_cast<size_t>(total) < count) {
+        size_t want = count - static_cast<size_t>(total);
+        if (want > sizeof(buf)) want = sizeof(buf);
+        ssize_t got;
+        if (offset) {
+            int e = sys_pread(in_fd, buf, want, *offset, &got);
+            if (e) { if (total) break; return e; }
+        } else {
+            int e = sys_read(in_fd, buf, want, &got);
+            if (e) { if (total) break; return e; }
+        }
+        if (got == 0) break;
+        ssize_t done = 0;
+        while (done < got) {
+            ssize_t wrote;
+            int e = sys_write(out_fd, buf + done, static_cast<size_t>(got - done), &wrote);
+            if (e) { *out = total ? total : -1; return total ? 0 : e; }
+            done += wrote;
+        }
+        if (offset) *offset += got;
+        total += got;
+    }
+    *out = total;
+    return 0;
+}
+
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

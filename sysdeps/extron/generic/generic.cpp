@@ -387,11 +387,12 @@ int sys_before_cancellable_syscall(ucontext_t *context) {
 // --- Panic & Logging (Crucial for debugging early boot) ---
 
 void sys_libc_log(const char *message) {
-    // Write directly to stdout (FD 1).
+    // Write to stderr (FD 2), never stdout: libc diagnostics must not end up in
+    // a pipe or file the program is producing.
     // We calculate length manually since we can't use strlen yet.
     size_t len = 0;
     while (message[len]) len++;
-    syscall3(SYS_WRITE, 1, (long)message, len);
+    syscall3(SYS_WRITE, 2, (long)message, len); /* stderr: fd 1 may be a pipe carrying program data */
 }
 
 void sys_libc_panic() {

@@ -46,7 +46,10 @@
 extern "C" {
 #endif
 
-#if defined(__x86_64__)
+/* The Extron kernel (struct extron_stat in kernel/proc/syscall.c) fills one
+ * fixed asm-generic layout on every architecture, so the x86_64 branch below
+ * (Linux's historical layout) is intentionally never selected. */
+#if 0
 
 struct stat {
 	dev_t st_dev;
@@ -66,7 +69,7 @@ struct stat {
 	long __unused[3];
 };
 
-#elif (defined(__riscv) && __riscv_xlen == 64) || defined (__aarch64__) || defined(__loongarch64)
+#elif 1 /* asm-generic layout, all Extron architectures */
 
 struct stat {
 	dev_t st_dev;

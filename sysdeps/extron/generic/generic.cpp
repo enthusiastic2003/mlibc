@@ -154,6 +154,9 @@
 #define SYS_TIMERFD_GETTIME 117
 #define SYS_SIGNALFD 118
 #endif
+#ifndef SYS_GETSID
+#define SYS_GETSID 120
+#endif
 #ifndef SYS_SIGTIMEDWAIT
 #define SYS_SIGTIMEDWAIT 119
 #endif
@@ -1417,6 +1420,13 @@ int sys_signalfd_create(const sigset_t *mask, int flags, int *fd) {
     long ret = syscall3(SYS_SIGNALFD, *fd, (long)mask, flags);
     if (ret < 0) return -ret;
     *fd = (int)ret;
+    return 0;
+}
+
+int sys_getsid(pid_t pid, pid_t *sid) {
+    long ret = syscall1(SYS_GETSID, pid);
+    if (ret < 0) return -ret;
+    *sid = (pid_t)ret;
     return 0;
 }
 

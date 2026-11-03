@@ -116,6 +116,7 @@
 #define SYS_SYSCONF     82
 #define SYS_STATVFS     83
 #define SYS_PATHCONF    84
+#define SYS_UPTIME_MS   10
 #define SYS_PREAD       85
 #define SYS_PWRITE      86
 #define SYS_FTRUNCATE   87

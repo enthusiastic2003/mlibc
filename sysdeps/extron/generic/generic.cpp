@@ -1214,6 +1214,14 @@ int sys_vm_remap(void *pointer, size_t size, size_t new_size, void **window) {
     return 0;
 }
 
+int sys_vm_remap2(void *pointer, size_t size, size_t new_size, int flags, void **window) {
+    long ret = syscall4(SYS_MREMAP, (long)pointer, size, new_size, flags);
+    if (ret < 0 && ret > -4096)
+        return -ret;
+    *window = (void *)ret;
+    return 0;
+}
+
 int sys_mknodat(int dirfd, const char *path, int mode, int dev) {
     path_at_request request{13, dirfd, (uint64_t)path, 0, 0, 0,
                             (uint64_t)(unsigned)mode, (uint64_t)dev};

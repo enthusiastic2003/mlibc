@@ -149,6 +149,9 @@ int sys_close(int fd);
 int sys_vm_map(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window);
 
 [[gnu::weak]] int sys_vm_remap(void *pointer, size_t size, size_t new_size, void **window);
+/* Variant that receives the mremap() flags (so growth without MREMAP_MAYMOVE can
+ * be refused instead of moving). Preferred over sys_vm_remap when provided. */
+[[gnu::weak]] int sys_vm_remap2(void *pointer, size_t size, size_t new_size, int flags, void **window);
 [[gnu::weak]] int sys_vm_protect(void *pointer, size_t size, int prot);
 
 int sys_vm_unmap(void *pointer, size_t size);

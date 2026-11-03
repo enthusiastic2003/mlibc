@@ -17,7 +17,6 @@ libc_sources += files(
 	'generic/sys-eventfd.cpp',
 	'generic/sys-reboot.cpp',
 	'generic/sys-xattr.cpp',
-	'generic/utmp.cpp',
 	'generic/linux-unistd.cpp',
 	'generic/malloc.cpp',
 	'generic/sys-fsuid.cpp',
@@ -34,6 +33,11 @@ libc_sources += files(
 	'generic/sys-statx.cpp',
 	'generic/sys-pidfd.cpp',
 )
+
+# utmp.cpp includes <utmp.h>, which lives in the BSD option.
+if bsd_option
+	libc_sources += files('generic/utmp.cpp')
+endif
 
 if not no_headers
 	install_headers(

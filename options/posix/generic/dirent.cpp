@@ -112,7 +112,10 @@ int readdir_r(DIR *dir, struct dirent *entry, struct dirent **result) {
 
 void rewinddir(DIR *dir) {
 	lseek(dir->__handle, 0, SEEK_SET);
+	// Drop the buffered entries too: with only __ent_next reset, readdir()
+	// would replay whatever was buffered before the rewind (stale names).
 	dir->__ent_next = 0;
+	dir->__ent_limit = 0;
 }
 
 int scandir(const char *path, struct dirent ***res, int (*select)(const struct dirent *),

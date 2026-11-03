@@ -391,6 +391,14 @@ int abstract_file::_save_pos() {
 		off_t new_offset;
 		auto seek_offset = (off_t(__offset) - off_t(__io_offset));
 		if (int e = io_seek(seek_offset, SEEK_CUR, &new_offset); e) {
+			// The descriptor can stop being seekable after the type was
+			// cached (a shell dup2()s a pipe over fd 0/1 in a forked child
+			// whose stdio objects were already classified). That is not an
+			// error: re-classify it as a pipe and carry on.
+			if (e == ESPIPE) {
+				_type = stream_type::pipe_like;
+				return 0;
+			}
 			__status_bits |= __MLIBC_ERROR_BIT;
 			mlibc::infoLogger() << "hit io_seek() error " << e << frg::endlog;
 			return e;

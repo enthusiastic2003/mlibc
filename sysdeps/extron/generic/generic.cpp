@@ -780,6 +780,7 @@ int sys_times(struct tms *tms, clock_t *out) {
 }
 
 int sys_madvise(void *, size_t, int) { return 0; }   // advice only; no behaviour to change
+int sys_posix_madvise(void *, size_t, int) { return 0; }
 
 int sys_waitid(idtype_t idtype, id_t id, siginfo_t *info, int options) {
     if (!(options & WEXITED)) return EINVAL;

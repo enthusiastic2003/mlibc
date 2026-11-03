@@ -55,7 +55,17 @@ namespace mlibc {
 		.lc = c_lconv
 	};
 
+	// mlibc's multibyte handling is UTF-8 in every locale (nl_langinfo(CODESET)
+	// always says "UTF-8"), so the UTF-8 flavours of C are the same locale
+	// under another name. Programs such as CPython probe for them.
+	constinit const locale_description c_utf8_locale{
+		.name = "C.UTF-8",
+		.lc = c_lconv
+	};
+
 	const locale_description *query_locale_description(const char *name) {
+		if(!strcmp(name, "C.UTF-8") || !strcmp(name, "C.utf8") || !strcmp(name, "UTF-8"))
+			return &c_utf8_locale;
 		if(!strcmp(name, "C"))
 			return &c_locale;
 		if(!strcmp(name, "POSIX"))
@@ -109,6 +119,7 @@ char *setlocale(int category, const char *name) {
 			mlibc::numeric_facet = new_desc;
 			mlibc::time_facet = new_desc;
 			mlibc::messages_facet = new_desc;
+			current_desc = new_desc;       // POSIX: report the locale now in effect
 		}
 		return const_cast<char *>(current_desc->name);
 	}else{
@@ -152,6 +163,7 @@ char *setlocale(int category, const char *name) {
 			}
 
 			*facet_ptr = new_desc;
+			current_desc = new_desc;
 		}
 		return const_cast<char *>(current_desc->name);
 	}

@@ -304,7 +304,6 @@ int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr) {
 
 	attr->__mlibc_guardsize = tcb->guardSize;
 	attr->__mlibc_detachstate = tcb->isJoinable ? PTHREAD_CREATE_JOINABLE : PTHREAD_CREATE_DETACHED;
-	mlibc::infoLogger() << "pthread_getattr_np(): Implementation is incomplete!" << frg::endlog;
 	return 0;
 }
 

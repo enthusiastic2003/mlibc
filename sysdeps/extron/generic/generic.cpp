@@ -112,6 +112,7 @@
 #define SYS_SYSCONF     82
 #define SYS_STATVFS     83
 #define SYS_PATHCONF    84
+#define SYS_PREAD       85
 
 
 using main_fn = int (*)(int, char **);
@@ -217,10 +218,13 @@ static long path_at(path_at_request &request) {
     return syscall1(SYS_PATH_AT, (long)&request);
 }
 
-extern "C" long __mlibc_do_asm_cp_syscall(long, long, long, long);
+extern "C" long __mlibc_do_asm_cp_syscall(long, long, long, long, long);
 
 static inline long cp_syscall3(long n, long a1, long a2, long a3) {
-    return __mlibc_do_asm_cp_syscall(n, a1, a2, a3);
+    return __mlibc_do_asm_cp_syscall(n, a1, a2, a3, 0);
+}
+static inline long cp_syscall4(long n, long a1, long a2, long a3, long a4) {
+    return __mlibc_do_asm_cp_syscall(n, a1, a2, a3, a4);
 }
 
 // ----------------------------------------------------------------
@@ -667,6 +671,13 @@ int sys_read(int fd, void *buf, size_t count, ssize_t *bytes_read) {
     if (ret < 0) {
         return -ret;
     }
+    *bytes_read = ret;
+    return 0;
+}
+
+int sys_pread(int fd, void *buf, size_t count, off_t offset, ssize_t *bytes_read) {
+    long ret = cp_syscall4(SYS_PREAD, fd, (long)buf, count, offset);
+    if (ret < 0) return -ret;
     *bytes_read = ret;
     return 0;
 }

@@ -11,11 +11,12 @@ __mlibc_signal_restore:
 .global __mlibc_syscall_end
 .type __mlibc_do_asm_cp_syscall, %function
 __mlibc_do_asm_cp_syscall:
-	/* x0=number, x1-x3=arguments. */
+	/* x0=number, x1-x4=arguments. */
 	mov x8, x0
 	mov x0, x1
 	mov x1, x2
 	mov x2, x3
+	mov x3, x4
 
 	/* mlibc's AArch64 thread pointer points 0x10 bytes past the TCB;
 	 * cancelBits is 80 bytes before that ABI pointer. */

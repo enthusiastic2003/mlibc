@@ -13,11 +13,12 @@ __mlibc_signal_restore:
 .global __mlibc_syscall_end
 .type __mlibc_do_asm_cp_syscall, @function
 __mlibc_do_asm_cp_syscall:
-	/* rdi=number, rsi/rdx/rcx = args 1-3 (cp_syscall3). */
+	/* rdi=number, rsi/rdx/rcx/r8 = args 1-4. */
 	mov %rdi, %rax
 	mov %rsi, %rdi
 	mov %rdx, %rsi
 	mov %rcx, %rdx
+	mov %r8, %r10
 	mov %fs:0x30, %r11         // Tcb::cancelBits
 __mlibc_syscall_begin:
 	and $((1 << 0) | (1 << 2)), %r11

@@ -113,6 +113,7 @@
 #define SYS_STATVFS     83
 #define SYS_PATHCONF    84
 #define SYS_PREAD       85
+#define SYS_PWRITE      86
 
 
 using main_fn = int (*)(int, char **);
@@ -679,6 +680,13 @@ int sys_pread(int fd, void *buf, size_t count, off_t offset, ssize_t *bytes_read
     long ret = cp_syscall4(SYS_PREAD, fd, (long)buf, count, offset);
     if (ret < 0) return -ret;
     *bytes_read = ret;
+    return 0;
+}
+
+int sys_pwrite(int fd, const void *buf, size_t count, off_t offset, ssize_t *bytes_written) {
+    long ret = cp_syscall4(SYS_PWRITE, fd, (long)buf, count, offset);
+    if (ret < 0) return -ret;
+    *bytes_written = ret;
     return 0;
 }
 

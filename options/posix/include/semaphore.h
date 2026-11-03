@@ -7,6 +7,7 @@ extern "C" {
 
 #include <bits/ansi/time_t.h>
 #include <bits/ansi/timespec.h>
+#include <abi-bits/clockid_t.h>
 
 #define SEM_VALUE_MAX 0x7FFFFFFF
 #define SEM_FAILED ((sem_t *) 0)

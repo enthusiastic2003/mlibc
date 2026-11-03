@@ -28,6 +28,11 @@ __mlibc_syscall_begin:
 __mlibc_syscall_end:
 	ret
 1:
+	/* We were entered with rsp == 8 (mod 16), so the `call` below would hand
+	 * __mlibc_do_cancel a misaligned stack and its aligned SSE spills (via
+	 * free() during cleanup) would fault with #GP. It never returns, so just
+	 * realign. */
+	and $-16, %rsp
 	call __mlibc_do_cancel
 	hlt
 

@@ -127,6 +127,12 @@
 #define SYS_FSYNC       88
 #define SYS_GETRANDOM   89
 #define SYS_YIELD       90
+#ifndef SYS_SIGSUSPEND
+#define SYS_SIGSUSPEND 94
+#define SYS_SIGPENDING 95
+#define SYS_MREMAP 97
+#define SYS_FLOCK 98
+#endif
 
 
 using main_fn = int (*)(int, char **);
@@ -227,6 +233,7 @@ static inline long syscall0(long n) { return extron_syscall0(n); }
 static inline long syscall1(long n, long a1) { return extron_syscall1(n, a1); }
 static inline long syscall2(long n, long a1, long a2) { return extron_syscall2(n, a1, a2); }
 static inline long syscall3(long n, long a1, long a2, long a3) { return extron_syscall3(n, a1, a2, a3); }
+static inline long syscall4(long n, long a1, long a2, long a3, long a4) { return extron_syscall4(n, a1, a2, a3, a4); }
 
 static long path_at(path_at_request &request) {
     return syscall1(SYS_PATH_AT, (long)&request);
@@ -1056,6 +1063,11 @@ int sys_fcntl(int fd, int request, va_list args, int *result) {
         case F_GETFD:
         case F_GETFL:
             break;
+        case F_GETLK:
+        case F_SETLK:
+        case F_SETLKW:
+            argument = (long)va_arg(args, void *);
+            break;
         default:
             return EINVAL;
     }
@@ -1178,6 +1190,40 @@ int sys_poll(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
 }
 
 // Add any other functions mlibc complains about during linking as ENOSYS stubs here...
+
+int sys_sigsuspend(const sigset_t *set) {
+    long ret = syscall1(SYS_SIGSUSPEND, (long)set);
+    return ret < 0 ? -ret : 0;          /* always EINTR on success */
+}
+
+int sys_sigpending(sigset_t *set) {
+    long ret = syscall1(SYS_SIGPENDING, (long)set);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_flock(int fd, int options) {
+    long ret = syscall2(SYS_FLOCK, fd, options);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_vm_remap(void *pointer, size_t size, size_t new_size, void **window) {
+    long ret = syscall4(SYS_MREMAP, (long)pointer, size, new_size, 1 /* MAYMOVE */);
+    if (ret < 0 && ret > -4096)
+        return -ret;
+    *window = (void *)ret;
+    return 0;
+}
+
+int sys_mknodat(int dirfd, const char *path, int mode, int dev) {
+    path_at_request request{13, dirfd, (uint64_t)path, 0, 0, 0,
+                            (uint64_t)(unsigned)mode, (uint64_t)dev};
+    long ret = path_at(request);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_mkfifoat(int dirfd, const char *path, mode_t mode) {
+    return sys_mknodat(dirfd, path, (int)(mode & 07777) | 0010000, 0);
+}
 
 int sys_isatty(int fd) {
     struct termios termios;

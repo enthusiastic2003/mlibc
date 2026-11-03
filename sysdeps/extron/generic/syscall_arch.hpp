@@ -38,6 +38,16 @@ static inline long extron_syscall3(long n, long a1, long a2, long a3) {
     return x0;
 }
 
+static inline long extron_syscall4(long n, long a1, long a2, long a3, long a4) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    register long x1 __asm__("x1") = a2;
+    register long x2 __asm__("x2") = a3;
+    register long x3 __asm__("x3") = a4;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3) : "memory", "cc");
+    return x0;
+}
+
 // AArch64 TLS (variant I): the ABI thread pointer is 16 bytes before the TLS
 // block, i.e. just below the end of the Tcb.
 #define EXTRON_TP_FROM_TCB(tcb, tcb_size) (reinterpret_cast<char *>(tcb) + (tcb_size) - 0x10)
@@ -62,6 +72,13 @@ static inline long extron_syscall2(long n, long a1, long a2) {
 static inline long extron_syscall3(long n, long a1, long a2, long a3) {
     long r;
     __asm__ volatile ("syscall" : "=a"(r) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory", "cc");
+    return r;
+}
+
+static inline long extron_syscall4(long n, long a1, long a2, long a3, long a4) {
+    long r;
+    register long r10 __asm__("r10") = a4;
+    __asm__ volatile ("syscall" : "=a"(r) : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10) : "rcx", "r11", "memory", "cc");
     return r;
 }
 

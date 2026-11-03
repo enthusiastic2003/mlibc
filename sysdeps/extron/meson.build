@@ -1,11 +1,23 @@
 sysdep_supported_options = {
 	'posix': true,
 	'linux': false,
-	'glibc': false,
+	'glibc': true,
 	'bsd': false,
 }
 
+# Extron has real file-backed MAP_PRIVATE mappings and mprotect(). Let the
+# runtime linker reserve DSO address space through mmap() instead of using
+# mlibc's fixed 0x41000000 fallback, which is outside Extron's mmap arena.
+internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
+
+# Cortex-A72 predates LSE. More importantly, ld.so must not require libgcc's
+# __aarch64_* atomic helpers before it has loaded any shared libraries.
 add_project_arguments('-D_GNU_SOURCE', language: ['c', 'cpp'])
+if host_machine.cpu_family() == 'aarch64'
+    add_project_arguments('-mno-outline-atomics', language: ['c', 'cpp'])
+endif
+extron_arch = host_machine.cpu_family()
 
 # Add any hardware capabilities you are missing here
 # libc_hw_caps += {
@@ -13,14 +25,19 @@ add_project_arguments('-D_GNU_SOURCE', language: ['c', 'cpp'])
 #    'missing_file_locking': true,
 #}
 
-# Compile our generic.cpp into both the dynamic linker and the standard library
-# rtld_sources += files('generic/generic.cpp')
-libc_sources += files('generic/generic.cpp')
+# ld.so runs before libc.so exists. Keep its syscall surface deliberately
+# small and independent from libc startup, pthread cancellation, and stdio.
+rtld_sources += files('generic/rtld.cpp')
+libc_sources += files('generic/generic.cpp', 'generic/thread.cpp',
+    extron_arch / 'thread_entry.S', extron_arch / 'signals.S')
 
+rtld_include_dirs += include_directories('generic')
+libc_include_dirs += include_directories('generic')
 # rtld_include_dirs += include_directories('include')
 libc_include_dirs += include_directories('include')
 
 if not no_headers
+    install_headers('include/sys/sysmacros.h', subdir: 'sys')
     install_headers(
         'include/abi-bits/access.h',
         'include/abi-bits/auxv.h',
@@ -84,7 +101,7 @@ if not headers_only
     crt = custom_target('crt1',
         build_by_default: true,
         command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
-        input: 'crt1.S',
+        input: extron_arch / 'crt1.S',
         output: 'crt1.o',
         install: true,
         install_dir: get_option('libdir')

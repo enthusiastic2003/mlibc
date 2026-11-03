@@ -263,9 +263,14 @@ int fexecve(int, char *const [], char *const []) {
 	__builtin_unreachable();
 }
 
-long fpathconf(int, int) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+long fpathconf(int fd, int name) {
+	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_fpathconf, -1);
+	long result;
+	if(int e = mlibc::sys_fpathconf(fd, name, &result); e) {
+		errno = e;
+		return -1;
+	}
+	return result;
 }
 
 int fsync(int fd) {
@@ -583,15 +588,14 @@ int nice(int nice) {
 	return new_nice;
 }
 
-long pathconf(const char *, int name) {
-	switch (name) {
-	case _PC_NAME_MAX:
-		return NAME_MAX;
-	default:
-		mlibc::infoLogger() << "missing pathconf() entry " << name << frg::endlog;
-		errno = EINVAL;
+long pathconf(const char *path, int name) {
+	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_pathconf, -1);
+	long result;
+	if(int e = mlibc::sys_pathconf(path, name, &result); e) {
+		errno = e;
 		return -1;
 	}
+	return result;
 }
 
 int pause(void) {

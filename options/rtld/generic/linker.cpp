@@ -76,6 +76,7 @@ size_t tlsMaxAlignment = 16;
 // object became global). This mechanism is used to determine which
 // part of the global scope is considered for symbol resolution.
 uint64_t rtsCounter = 2;
+uint64_t rtsUnloadCounter = 0;
 
 namespace {
 
@@ -183,6 +184,7 @@ ObjectRepository::ObjectRepository()
 : loadedObjects{getAllocator()},
 	dependencyQueue{getAllocator()},
 	_nameMap{frg::hash<frg::string_view>{}, getAllocator()},
+	_localScopes{getAllocator()},
 	_destructQueue{getAllocator()} {}
 
 SharedObject *ObjectRepository::injectObjectFromDts(frg::string_view name,
@@ -338,6 +340,7 @@ frg::expected<LinkerError, SharedObject *> ObjectRepository::requestObjectWithNa
 	if(fd == -1)
 		return LinkerError::notFound;
 
+	bool ownsScope = createScope;
 	if (createScope) {
 		__ensure(localScope == nullptr);
 
@@ -354,12 +357,16 @@ frg::expected<LinkerError, SharedObject *> ObjectRepository::requestObjectWithNa
 	closeOrDie(fd);
 	if(!result) {
 		frg::destruct(getAllocator(), object);
+		if(ownsScope)
+			frg::destruct(getAllocator(), localScope);
 		return result.error();
 	}
 
 	_parseDynamic(object);
 	_parseVerdef(object);
 	_addLoadedObject(object);
+	if(ownsScope)
+		_registerLocalScope(localScope);
 
 	return object;
 }
@@ -375,6 +382,7 @@ frg::expected<LinkerError, SharedObject *> ObjectRepository::requestObjectAtPath
 	if (auto obj = findLoadedObject(name))
 		return obj;
 
+	bool ownsScope = createScope;
 	if (createScope) {
 		__ensure(localScope == nullptr);
 
@@ -392,18 +400,24 @@ frg::expected<LinkerError, SharedObject *> ObjectRepository::requestObjectAtPath
 	int fd;
 	if(mlibc::sys_open((no_prefix + '\0').data(), O_RDONLY, 0, &fd)) {
 		frg::destruct(getAllocator(), object);
+		if(ownsScope)
+			frg::destruct(getAllocator(), localScope);
 		return LinkerError::notFound;
 	}
 	auto result = _fetchFromFile(object, fd);
 	closeOrDie(fd);
 	if(!result) {
 		frg::destruct(getAllocator(), object);
+		if(ownsScope)
+			frg::destruct(getAllocator(), localScope);
 		return result.error();
 	}
 
 	_parseDynamic(object);
 	_parseVerdef(object);
 	_addLoadedObject(object);
+	if(ownsScope)
+		_registerLocalScope(localScope);
 
 	return object;
 }
@@ -447,6 +461,14 @@ SharedObject *ObjectRepository::findLoadedObject(frg::string_view name) {
 	return nullptr;
 }
 
+bool ObjectRepository::isLoadedObject(SharedObject *target) {
+	for(auto object : loadedObjects) {
+		if(object == target)
+			return true;
+	}
+	return false;
+}
+
 void ObjectRepository::addObjectToDestructQueue(SharedObject *object) {
 	_destructQueue.push(object);
 }
@@ -455,7 +477,7 @@ void doDestruct(SharedObject *object);
 
 void ObjectRepository::destructObjects() {
 	while (_destructQueue.size() > 0) {
-		auto top = _destructQueue.top();
+		auto top = _destructQueue[_destructQueue.size() - 1];
 		doDestruct(top);
 		_destructQueue.pop();
 	}
@@ -507,6 +529,10 @@ void ObjectRepository::_fetchFromPhdrs(SharedObject *object, void *phdr_pointer,
 					getAllocator()
 			};
 		} break;
+		case PT_GNU_RELRO:
+			object->relroStart = phdr->p_vaddr;
+			object->relroSize = phdr->p_memsz;
+			break;
 		default:
 			//FIXME warn about unknown phdrs
 			break;
@@ -575,6 +601,8 @@ frg::expected<LinkerError, void> ObjectRepository::_fetchFromFile(SharedObject *
 	__ensure(!(object->baseAddress & (hugeSize - 1)));
 
 	highest_address = (highest_address + mlibc::page_size - 1) & ~(mlibc::page_size - 1);
+	object->mapSize = highest_address;
+	object->ownsPhdr = true;
 
 #if MLIBC_MMAP_ALLOCATE_DSO
 	void *mappedAddr = nullptr;
@@ -682,12 +710,14 @@ frg::expected<LinkerError, void> ObjectRepository::_fetchFromFile(SharedObject *
 			object->tlsImagePtr = (void *)(object->baseAddress + phdr->p_vaddr);
 		}else if(phdr->p_type == PT_DYNAMIC) {
 			object->dynamic = (elf_dyn *)(object->baseAddress + phdr->p_vaddr);
+		}else if(phdr->p_type == PT_GNU_RELRO) {
+			object->relroStart = phdr->p_vaddr;
+			object->relroSize = phdr->p_memsz;
 		}else if(phdr->p_type == PT_INTERP
 				|| phdr->p_type == PT_PHDR
 				|| phdr->p_type == PT_NOTE
 				|| phdr->p_type == PT_RISCV_ATTRIBUTES
 				|| phdr->p_type == PT_GNU_EH_FRAME
-				|| phdr->p_type == PT_GNU_RELRO
 				|| phdr->p_type == PT_GNU_STACK
 				|| phdr->p_type == PT_GNU_PROPERTY) {
 			// ignore the phdr
@@ -790,9 +820,9 @@ void ObjectRepository::_parseDynamic(SharedObject *object) {
 		case DT_FLAGS_1:
 			if(dynamic->d_un.d_val & DF_1_NOW)
 				object->eagerBinding = true;
+			if(dynamic->d_un.d_val & DF_1_NODELETE)
+				object->noDelete = true;
 			// The DF_1_PIE flag is informational only. It is used by e.g file(1).
-			// The DF_1_NODELETE flag has a similar effect to RTLD_NODELETE, both of which we
-			// ignore because we don't implement dlclose().
 			if(dynamic->d_un.d_val & ~(DF_1_NOW | DF_1_PIE | DF_1_NODELETE))
 				mlibc::infoLogger() << "\e[31mrtld: DT_FLAGS_1(" << frg::hex_fmt{dynamic->d_un.d_val}
 						<< ") is not implemented correctly!\e[39m"
@@ -1118,7 +1148,8 @@ SharedObject::SharedObject(const char *name, frg::string<MemoryAllocator> path,
 		: name(name, getAllocator()), path(std::move(path)),
 		interpreterPath(getAllocator()), soName(nullptr),
 		isMainObject(is_main_object), objectRts(object_rts), inLinkMap(false),
-		baseAddress(0), localScope(local_scope), dynamic(nullptr),
+		baseAddress(0), relroStart(0), relroSize(0), mapSize(0), ownsPhdr(false),
+		localScope(local_scope), dynamic(nullptr),
 		globalOffsetTable(nullptr), entry(nullptr), tlsSegmentSize(0),
 		tlsAlignment(0), tlsImageSize(0), tlsImagePtr(nullptr),
 		tlsInitialized(false), hashTableOffset(0), symbolTableOffset(0),
@@ -1128,7 +1159,8 @@ SharedObject::SharedObject(const char *name, frg::string<MemoryAllocator> path,
 		lazyExplicitAddend(false), symbolicResolution(false),
 		eagerBinding(false), haveStaticTls(false),
 		dependencies(getAllocator()), tlsModel(TlsModel::null),
-		tlsOffset(0), globalRts(0), wasLinked(false),
+		tlsOffset(0), globalRts(0), openCount(0), noDelete(false),
+		unloadReachable(false), wasLinked(false),
 		scheduledForInit(false), onInitStack(false),
 		wasInitialized(false) { }
 
@@ -1318,12 +1350,121 @@ void doDestruct(SharedObject *object) {
 	object->wasDestroyed = true;
 }
 
+void ObjectRepository::_registerLocalScope(Scope *scope) {
+	_localScopes.push_back(scope);
+}
+
+void ObjectRepository::_collectEmptyScopes() {
+	size_t output = 0;
+	for(size_t i = 0; i < _localScopes.size(); i++) {
+		if(_localScopes[i]->empty()) {
+			frg::destruct(getAllocator(), _localScopes[i]);
+		}else{
+			_localScopes[output++] = _localScopes[i];
+		}
+	}
+	_localScopes.resize(output);
+}
+
+void ObjectRepository::_removeLoadedObject(SharedObject *object) {
+	__ensure(object->objectRts > 1);
+	__ensure(!object->unloadReachable);
+
+	globalScope->removeObject(object);
+	for(auto scope : _localScopes)
+		scope->removeObject(object);
+
+	if(object->inLinkMap) {
+		if(object->linkMap.prev)
+			object->linkMap.prev->next = object->linkMap.next;
+		if(object->linkMap.next)
+			object->linkMap.next->prev = object->linkMap.prev;
+		object->inLinkMap = false;
+	}
+
+	releaseTlsForObject(object);
+	_nameMap.remove(object->name);
+
+	auto removePointer = [object](auto &vector) {
+		size_t output = 0;
+		for(size_t i = 0; i < vector.size(); i++) {
+			if(vector[i] != object)
+				vector[output++] = vector[i];
+		}
+		vector.resize(output);
+	};
+	removePointer(loadedObjects);
+	removePointer(dependencyQueue);
+	removePointer(_destructQueue);
+
+	if(object->mapSize) {
+		if(mlibc::sys_vm_unmap(reinterpret_cast<void *>(object->baseAddress),
+				object->mapSize))
+			__ensure(!"sys_vm_unmap failed while unloading DSO");
+	}
+	if(object->ownsPhdr)
+		getAllocator().deallocate(object->phdrPointer,
+				object->phdrCount * object->phdrEntrySize);
+
+	frg::destruct(getAllocator(), object);
+	++rtsUnloadCounter;
+}
+
+bool ObjectRepository::closeObject(SharedObject *object) {
+	if(!isLoadedObject(object))
+		return false;
+
+	if(object->openCount) {
+		--object->openCount;
+	}else if(object->objectRts > 1) {
+		return false;
+	}
+	if(object->openCount)
+		return true;
+
+	for(auto loaded : loadedObjects)
+		loaded->unloadReachable = false;
+
+	frg::vector<SharedObject *, MemoryAllocator> queue{getAllocator()};
+	for(auto loaded : loadedObjects) {
+		if(loaded->objectRts == 1 || loaded->openCount || loaded->noDelete) {
+			loaded->unloadReachable = true;
+			queue.push_back(loaded);
+		}
+	}
+	for(size_t i = 0; i < queue.size(); i++) {
+		for(auto dependency : queue[i]->dependencies) {
+			if(!dependency->unloadReachable) {
+				dependency->unloadReachable = true;
+				queue.push_back(dependency);
+			}
+		}
+	}
+
+	// The initialization queue stores dependencies before their users. Walk it
+	// backwards so destructors run users-before-dependencies.
+	for(size_t i = _destructQueue.size(); i > 0; i--) {
+		if(!_destructQueue[i - 1]->unloadReachable)
+			doDestruct(_destructQueue[i - 1]);
+	}
+
+	frg::vector<SharedObject *, MemoryAllocator> unload{getAllocator()};
+	for(auto loaded : loadedObjects) {
+		if(!loaded->unloadReachable)
+			unload.push_back(loaded);
+	}
+	for(size_t i = unload.size(); i > 0; i--)
+		_removeLoadedObject(unload[i - 1]);
+	_collectEmptyScopes();
+	return true;
+}
+
 // --------------------------------------------------------
 // RuntimeTlsMap
 // --------------------------------------------------------
 
 RuntimeTlsMap::RuntimeTlsMap()
-: initialPtr{0}, initialLimit{0}, indices{getAllocator()} { }
+: initialPtr{0}, initialLimit{0}, indices{getAllocator()}, activeTcbs{getAllocator()} { }
 
 void initTlsObjects(Tcb *tcb, const frg::vector<SharedObject *, MemoryAllocator> &objects, bool checkInitialized) {
 	// Initialize TLS segments that follow the static model.
@@ -1408,6 +1549,8 @@ Tcb *allocateTcb() {
 	memset(tcb_ptr->dtvPointers, 0, sizeof(void *) * runtimeTlsMap->indices.size());
 	for(size_t i = 0; i < runtimeTlsMap->indices.size(); ++i) {
 		auto object = runtimeTlsMap->indices[i];
+		if(!object)
+			continue;
 		if(object->tlsModel != TlsModel::initial)
 			continue;
 
@@ -1417,6 +1560,7 @@ Tcb *allocateTcb() {
 			tcb_ptr->dtvPointers[i] = reinterpret_cast<char *>(tcb_ptr) + object->tlsOffset;
 		}
 	}
+	runtimeTlsMap->activeTcbs.push_back(tcb_ptr);
 
 	return tcb_ptr;
 }
@@ -1463,6 +1607,25 @@ void *tryAccessDtv(SharedObject *object) {
 		return nullptr;
 
 	return (void *)((char *)tcb_ptr->dtvPointers[object->tlsIndex] + TLS_DTV_OFFSET);
+}
+
+void releaseTlsForObject(SharedObject *object) {
+	if(object->tlsModel == TlsModel::null)
+		return;
+
+	for(auto tcb : runtimeTlsMap->activeTcbs) {
+		if(object->tlsIndex >= tcb->dtvSize)
+			continue;
+		void *pointer = tcb->dtvPointers[object->tlsIndex];
+		if(!pointer)
+			continue;
+		if(object->tlsModel == TlsModel::dynamic)
+			getAllocator().deallocate(pointer, object->tlsSegmentSize);
+		tcb->dtvPointers[object->tlsIndex] = nullptr;
+	}
+
+	__ensure(object->tlsIndex < runtimeTlsMap->indices.size());
+	runtimeTlsMap->indices[object->tlsIndex] = nullptr;
 }
 
 // --------------------------------------------------------
@@ -1651,6 +1814,19 @@ void Scope::appendObject(SharedObject *object) {
 	_objects.push(object);
 }
 
+void Scope::removeObject(SharedObject *object) {
+	size_t output = 0;
+	for(size_t i = 0; i < _objects.size(); i++) {
+		if(_objects[i] != object)
+			_objects[output++] = _objects[i];
+	}
+	_objects.resize(output);
+}
+
+bool Scope::empty() const {
+	return _objects.empty();
+}
+
 frg::optional<ObjectSymbol> Scope::resolveGlobalOrLocal(Scope &globalScope,
 		Scope *localScope, frg::string_view string, uint64_t skipRts, ResolveFlags flags,
 		frg::optional<SymbolVersion> version) {
@@ -1788,6 +1964,25 @@ void Loader::linkObjects(SharedObject *root) {
 	}
 
 	for(auto object : _linkBfs) {
+		// Relocations are complete now. Protect every complete page covered by
+		// PT_GNU_RELRO before constructors or user code can modify it. The final
+		// partial page is deliberately excluded: it can also contain ordinary
+		// writable data, and ELF linkers arrange fully protected RELRO to end on
+		// a page boundary.
+		if(object->objectRts >= _linkRts && object->relroSize) {
+			uintptr_t start = (object->baseAddress + object->relroStart)
+					& ~(mlibc::page_size - 1);
+			uintptr_t end = (object->baseAddress + object->relroStart
+					+ object->relroSize) & ~(mlibc::page_size - 1);
+			if(end > start) {
+				if(!mlibc::sys_vm_protect)
+					__ensure(!"sys_vm_protect not provided for PT_GNU_RELRO");
+				if(mlibc::sys_vm_protect(reinterpret_cast<void *>(start),
+						end - start, PROT_READ))
+					__ensure(!"sys_vm_protect failed for PT_GNU_RELRO");
+			}
+		}
+
 		object->wasLinked = true;
 
 		if(object->inLinkMap)
@@ -1804,6 +1999,20 @@ void Loader::linkObjects(SharedObject *root) {
 	}
 }
 
+static void assignTlsIndex(SharedObject *object, bool permitReuse) {
+	if(permitReuse) {
+		for(size_t i = 0; i < runtimeTlsMap->indices.size(); i++) {
+			if(!runtimeTlsMap->indices[i]) {
+				object->tlsIndex = i;
+				runtimeTlsMap->indices[i] = object;
+				return;
+			}
+		}
+	}
+	object->tlsIndex = runtimeTlsMap->indices.size();
+	runtimeTlsMap->indices.push_back(object);
+}
+
 void Loader::_buildTlsMaps() {
 	if(_isInitialLink) {
 		__ensure(runtimeTlsMap->initialPtr == 0);
@@ -1818,9 +2027,7 @@ void Loader::_buildTlsMaps() {
 			if(object->tlsSegmentSize == 0)
 				continue;
 
-			// Allocate an index for the object.
-			object->tlsIndex = runtimeTlsMap->indices.size();
-			runtimeTlsMap->indices.push_back(object);
+			assignTlsIndex(object, false);
 
 			object->tlsModel = TlsModel::initial;
 
@@ -1857,9 +2064,7 @@ void Loader::_buildTlsMaps() {
 			if(object->tlsSegmentSize == 0)
 				continue;
 
-			// Allocate an index for the object.
-			object->tlsIndex = runtimeTlsMap->indices.size();
-			runtimeTlsMap->indices.push_back(object);
+			assignTlsIndex(object, true);
 
 			// There are some libraries (e.g. Mesa) that require static TLS even though
 			// they expect to be dynamically loaded.
@@ -2276,4 +2481,3 @@ void Loader::_processLazyRelocations(SharedObject *object) {
 		}
 	}
 }
-

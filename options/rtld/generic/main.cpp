@@ -3,6 +3,7 @@
 #include <link.h>
 
 #include <frg/manual_box.hpp>
+#include <frg/mutex.hpp>
 #include <frg/small_vector.hpp>
 
 #include <abi-bits/auxv.h>
@@ -11,6 +12,7 @@
 #include <mlibc/rtld-config.hpp>
 #include <mlibc/rtld-abi.hpp>
 #include <mlibc/stack_protector.hpp>
+#include <mlibc/lock.hpp>
 #include <internal-config.h>
 #include <abi-bits/auxv.h>
 
@@ -43,11 +45,19 @@ mlibc::RtldConfig rtldConfig;
 bool ldShowAuxv = false;
 
 uintptr_t *entryStack;
+bool ldTraceLoadedObjects = false;
 static constinit Tcb earlyTcb{};
 frg::manual_box<ObjectRepository> initialRepository;
 frg::manual_box<Scope> globalScope;
 
 frg::manual_box<RuntimeTlsMap> runtimeTlsMap;
+frg::manual_box<RecursiveFutexLock> rtldLock;
+
+struct DlErrorSlot {
+	int tid;
+	const char *error;
+};
+frg::manual_box<frg::vector<DlErrorSlot, MemoryAllocator>> dlErrorSlots;
 
 // We use a small vector to avoid memory allocation for the default library paths
 frg::manual_box<frg::small_vector<frg::string_view, MLIBC_NUM_DEFAULT_LIBRARY_PATHS, MemoryAllocator>> libraryPaths;
@@ -201,6 +211,7 @@ extern "C" void relocateSelf68k(elf_dyn *dynamic, uintptr_t ldso_base) {
 #endif
 
 extern "C" void *lazyRelocate(SharedObject *object, unsigned int rel_index) {
+	frg::unique_lock lock{*rtldLock};
 	__ensure(object->lazyExplicitAddend);
 	auto reloc = (elf_rela *)(object->baseAddress + object->lazyRelocTableOffset
 			+ rel_index * sizeof(elf_rela));
@@ -223,6 +234,7 @@ extern "C" void *lazyRelocate(SharedObject *object, unsigned int rel_index) {
 }
 
 extern "C" [[ gnu::visibility("default") ]] void *__rtld_allocateTcb() {
+	frg::unique_lock lock{*rtldLock};
 	auto tcb = allocateTcb();
 	initTlsObjects(tcb, globalScope->_objects, false);
 	return tcb;
@@ -294,6 +306,8 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 		__ensure(!"sys_tcb_set() failed");
 	mlibc::tcb_available_flag = true;
 
+	rtldLock.initialize();
+	dlErrorSlots.initialize(getAllocator());
 	runtimeTlsMap.initialize();
 	libraryPaths.initialize(getAllocator());
 	preloads.initialize(getAllocator());
@@ -401,6 +415,8 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 				libraryPaths->push_back(path);
 		}else if(name == "LD_PRELOAD" && *value) {
 			*preloads = parseList(value, " :");
+		}else if(name == "LD_TRACE_LOADED_OBJECTS" && *value && *value != '0') {
+			ldTraceLoadedObjects = true;
 		}
 
 		aux++;
@@ -557,6 +573,30 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 
 	mlibc::initStackGuard(stack_entropy);
 
+	// ldd(1) asks the real runtime linker to resolve the object graph, but
+	// must not relocate it, run constructors, or enter the inspected program.
+	// Reporting here ensures that tracing follows exactly the same DT_NEEDED,
+	// RUNPATH/RPATH, LD_LIBRARY_PATH and default-path decisions as execution.
+	if(ldTraceLoadedObjects) {
+		for(auto object : initialRepository->loadedObjects) {
+			if(object->isMainObject)
+				continue;
+
+#ifndef MLIBC_STATIC_BUILD
+			if(object == ldso) {
+				mlibc::infoLogger() << "\t" << object->path << " (0x"
+						<< frg::hex_fmt(object->baseAddress) << ")" << frg::endlog;
+			}else
+#endif
+			{
+				mlibc::infoLogger() << "\t" << object->name << " => " << object->path
+						<< " (0x" << frg::hex_fmt(object->baseAddress) << ")" << frg::endlog;
+			}
+			mlibc::sys_libc_log("\n");
+		}
+		mlibc::sys_exit(0);
+	}
+
 	auto tcb = allocateTcb();
 	tcb->tid = earlyTcb.tid;
 	if(mlibc::sys_tcb_set(tcb))
@@ -575,7 +615,28 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 	return executableSO->entry;
 }
 
-const char *lastError;
+static void setLastError(const char *error) {
+	int tid = mlibc::this_tid();
+	for(auto &slot : *dlErrorSlots) {
+		if(slot.tid == tid) {
+			slot.error = error;
+			return;
+		}
+	}
+	dlErrorSlots->push_back({tid, error});
+}
+
+static const char *takeLastError() {
+	int tid = mlibc::this_tid();
+	for(auto &slot : *dlErrorSlots) {
+		if(slot.tid == tid) {
+			auto error = slot.error;
+			slot.error = nullptr;
+			return error;
+		}
+	}
+	return nullptr;
+}
 
 extern "C" [[ gnu::visibility("default") ]] uintptr_t *__dlapi_entrystack() {
 	return entryStack;
@@ -583,13 +644,13 @@ extern "C" [[ gnu::visibility("default") ]] uintptr_t *__dlapi_entrystack() {
 
 extern "C" [[ gnu::visibility("default") ]]
 const char *__dlapi_error() {
-	auto error = lastError;
-	lastError = nullptr;
-	return error;
+	frg::unique_lock lock{*rtldLock};
+	return takeLastError();
 }
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_get_tls(struct __abi_tls_entry *entry) {
+	frg::unique_lock lock{*rtldLock};
 	return reinterpret_cast<char *>(accessDtv(entry->object)) + entry->offset;
 }
 
@@ -599,13 +660,17 @@ const mlibc::RtldConfig &__dlapi_get_config() {
 }
 
 extern "C" [[ gnu::visibility("default") ]] void __dlapi_exit() {
-	initialRepository->destructObjects();
+	if (initialRepository.valid() && rtldLock.valid()) {
+		frg::unique_lock lock{*rtldLock};
+		initialRepository->destructObjects();
+	}
 }
 
 #if __MLIBC_POSIX_OPTION
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_open(const char *file, int flags, void *returnAddress) {
+	frg::unique_lock lock{*rtldLock};
 	if (logDlCalls)
 		mlibc::infoLogger() << "rtld: __dlapi_open(" << (file ? file : "nullptr") << ")" << frg::endlog;
 
@@ -615,7 +680,6 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 	if(!file)
 		return executableSO;
 
-	// TODO: Thread-safety!
 	auto rts = rtsCounter++;
 
 	SharedObject *object;
@@ -626,6 +690,10 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 			// According to the man page, we should promote to the global scope here.
 			object->globalRts = rts;
 			globalScope->appendObject(object);
+		}
+		if(!object) {
+			setLastError("Requested DSO is not loaded");
+			return nullptr;
 		}
 	} else {
 		bool isGlobal = flags & RTLD_GLOBAL;
@@ -650,29 +718,32 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 			case LinkerError::success:
 				__builtin_unreachable();
 			case LinkerError::notFound:
-				lastError = "Cannot locate requested DSO";
+				setLastError("Cannot locate requested DSO");
 				break;
 			case LinkerError::fileTooShort:
-				lastError = "File too short";
+				setLastError("File too short");
 				break;
 			case LinkerError::notElf:
-				lastError = "File is not an ELF file";
+				setLastError("File is not an ELF file");
 				break;
 			case LinkerError::wrongElfType:
-				lastError = "File has wrong ELF type";
+				setLastError("File has wrong ELF type");
 				break;
 			case LinkerError::outOfMemory:
-				lastError = "Out of memory";
+				setLastError("Out of memory");
 				break;
 			case LinkerError::invalidProgramHeader:
-				lastError = "File has invalid program header";
+				setLastError("File has invalid program header");
 				break;
 			}
 			return nullptr;
 		}
 
 		object = objectResult.value();
-		initialRepository->discoverDependenciesFromLoadedObject(object);
+		if(!object->dependenciesDiscovered) {
+			initialRepository->discoverDependenciesFromLoadedObject(object);
+			object->dependenciesDiscovered = true;
+		}
 		for (size_t i = 0; i < initialRepository->dependencyQueue.size(); i++) {
 			auto current = initialRepository->dependencyQueue[i];
 			if(!current->dependenciesDiscovered) {
@@ -685,6 +756,9 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 		linker.linkObjects(object);
 		linker.initObjects(initialRepository.get());
 	}
+	object->openCount++;
+	if(flags & RTLD_NODELETE)
+		object->noDelete = true;
 
 	dl_debug_state();
 
@@ -693,6 +767,12 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_resolve(void *handle, const char *string, void *returnAddress, const char *version) {
+	frg::unique_lock lock{*rtldLock};
+	if(handle != RTLD_DEFAULT && handle != RTLD_NEXT
+			&& !initialRepository->isLoadedObject(reinterpret_cast<SharedObject *>(handle))) {
+		setLastError("Invalid or closed DSO handle");
+		return nullptr;
+	}
 	if (logDlCalls) {
 		const char *name;
 		bool quote = false;
@@ -771,9 +851,12 @@ void *__dlapi_resolve(void *handle, const char *string, void *returnAddress, con
 		if (logDlCalls)
 			mlibc::infoLogger() << "rtld: could not resolve \"" << string << "\"" << frg::endlog;
 
-		lastError = "Cannot resolve requested symbol";
+		setLastError("Cannot resolve requested symbol");
 		return nullptr;
 	}
+	if (ELF_ST_TYPE(target->symbol()->st_info) == STT_TLS)
+		return reinterpret_cast<char *>(accessDtv(target->object()))
+				+ target->symbol()->st_value;
 	return reinterpret_cast<void *>(target->virtualAddress());
 }
 
@@ -788,6 +871,7 @@ struct __dlapi_symbol {
 
 extern "C" [[ gnu::visibility("default") ]]
 int __dlapi_reverse(const void *ptr, __dlapi_symbol *info) {
+	frg::unique_lock lock{*rtldLock};
 	if (logDlCalls)
 		mlibc::infoLogger() << "rtld: __dlapi_reverse(" << ptr << ")" << frg::endlog;
 
@@ -887,9 +971,13 @@ int __dlapi_reverse(const void *ptr, __dlapi_symbol *info) {
 }
 
 extern "C" [[ gnu::visibility("default") ]]
-int __dlapi_close(void *) {
-	if (logDlCalls)
-		mlibc::infoLogger() << "mlibc: dlclose() is a no-op" << frg::endlog;
+int __dlapi_close(void *handle) {
+	frg::unique_lock lock{*rtldLock};
+	if(!initialRepository->closeObject(reinterpret_cast<SharedObject *>(handle))) {
+		setLastError("Invalid or already closed DSO handle");
+		return -1;
+	}
+	dl_debug_state();
 	return 0;
 }
 
@@ -897,6 +985,7 @@ int __dlapi_close(void *) {
 
 extern "C" [[ gnu::visibility("default") ]]
 int __dlapi_iterate_phdr(int (*callback)(struct dl_phdr_info *, size_t, void*), void *data) {
+	frg::unique_lock lock{*rtldLock};
 	int last_return = 0;
 	for (auto object : initialRepository->loadedObjects) {
 		struct dl_phdr_info info;
@@ -911,7 +1000,7 @@ int __dlapi_iterate_phdr(int (*callback)(struct dl_phdr_info *, size_t, void*), 
 		info.dlpi_phdr = static_cast<ElfW(Phdr)*>(object->phdrPointer);
 		info.dlpi_phnum = object->phdrCount;
 		info.dlpi_adds = rtsCounter;
-		info.dlpi_subs = 0; // TODO(geert): implement dlclose().
+		info.dlpi_subs = rtsUnloadCounter;
 		if (object->tlsModel != TlsModel::null)
 			info.dlpi_tls_modid = object->tlsIndex;
 		else
@@ -938,6 +1027,7 @@ void __dlapi_enter(uintptr_t *entry_stack) {
 #if __MLIBC_GLIBC_OPTION
 
 extern "C" [[gnu::visibility("default")]] int __dlapi_find_object(void *address, dl_find_object *result) {
+	frg::unique_lock lock{*rtldLock};
 	for(const SharedObject *object : initialRepository->loadedObjects) {
 		if(object->baseAddress > reinterpret_cast<uintptr_t>(address))
 			continue;

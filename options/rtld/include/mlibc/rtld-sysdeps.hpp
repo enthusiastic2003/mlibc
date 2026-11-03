@@ -3,6 +3,8 @@
 
 namespace [[gnu::visibility("hidden")]] mlibc {
 
+[[noreturn]] void sys_exit(int status);
+
 int sys_tcb_set(void *pointer);
 
 [[gnu::weak]] int sys_vm_readahead(void *pointer, size_t size);

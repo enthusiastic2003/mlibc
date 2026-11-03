@@ -19,6 +19,7 @@ struct ObjectSymbol;
 struct SymbolVersion;
 
 extern uint64_t rtsCounter;
+extern uint64_t rtsUnloadCounter;
 
 enum class TlsModel {
 	null,
@@ -76,6 +77,8 @@ struct ObjectRepository {
 	SharedObject *findCaller(void *address);
 
 	SharedObject *findLoadedObject(frg::string_view name);
+	bool isLoadedObject(SharedObject *object);
+	bool closeObject(SharedObject *object);
 
 	void addObjectToDestructQueue(SharedObject *object);
 	void destructObjects();
@@ -100,12 +103,16 @@ private:
 	void _discoverDependencies(SharedObject *object, Scope *localScope, uint64_t rts);
 
 	void _addLoadedObject(SharedObject *object);
+	void _removeLoadedObject(SharedObject *object);
+	void _registerLocalScope(Scope *scope);
+	void _collectEmptyScopes();
 
 	frg::hash_map<frg::string_view, SharedObject *,
 			frg::hash<frg::string_view>, MemoryAllocator> _nameMap;
+	frg::vector<Scope *, MemoryAllocator> _localScopes;
 
 	// Used for destructing the objects, stores all the objects in the order they are initialized.
-	frg::stack<SharedObject *, MemoryAllocator> _destructQueue;
+	frg::vector<SharedObject *, MemoryAllocator> _destructQueue;
 };
 
 // --------------------------------------------------------
@@ -165,6 +172,10 @@ struct SharedObject {
 
 	// base address this shared object was loaded to
 	uintptr_t baseAddress;
+	uintptr_t relroStart;
+	size_t relroSize;
+	size_t mapSize;
+	bool ownsPhdr;
 
 	Scope *localScope;
 
@@ -231,6 +242,9 @@ struct SharedObject {
 	ssize_t tlsOffset;
 
 	uint64_t globalRts;
+	size_t openCount;
+	bool noDelete;
+	bool unloadReachable;
 	bool wasLinked;
 
 	bool scheduledForInit;
@@ -339,6 +353,7 @@ struct RuntimeTlsMap {
 
 	// TLS indices.
 	frg::vector<SharedObject *, MemoryAllocator> indices;
+	frg::vector<Tcb *, MemoryAllocator> activeTcbs;
 };
 
 extern frg::manual_box<RuntimeTlsMap> runtimeTlsMap;
@@ -349,6 +364,7 @@ void *accessDtv(SharedObject *object);
 // Tries to access the DTV, if not allocated, or object doesn't have
 // PT_TLS, return nullptr.
 void *tryAccessDtv(SharedObject *object);
+void releaseTlsForObject(SharedObject *object);
 
 // --------------------------------------------------------
 // ObjectSymbol
@@ -462,6 +478,8 @@ struct Scope {
 	Scope(bool isGlobal = false);
 
 	void appendObject(SharedObject *object);
+	void removeObject(SharedObject *object);
+	bool empty() const;
 
 	frg::optional<ObjectSymbol> resolveSymbol(frg::string_view string, uint64_t skipRts, ResolveFlags flags,
 			frg::optional<SymbolVersion> version);
@@ -525,4 +543,3 @@ extern "C" void pltRelocateStub() __attribute__((__visibility__("hidden")));
 // --------------------------------------------------------
 
 uintptr_t *rtld_auxvector();
-

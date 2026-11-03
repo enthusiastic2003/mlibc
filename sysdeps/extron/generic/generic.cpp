@@ -1441,6 +1441,25 @@ int sys_sigtimedwait(const sigset_t *__restrict set, siginfo_t *__restrict info,
     return 0;
 }
 
+int sys_ttyname(int fd, char *buf, size_t size) {
+    char name[128];
+    int result;
+    if (int e = sys_ioctl(fd, 0x5480 /* TIOCGNAME (extron) */, name, &result); e)
+        return e;
+    size_t n = 0;
+    while (n < sizeof(name) - 1 && name[n]) n++;
+    if (n + 1 > size) return ERANGE;
+    for (size_t i = 0; i <= n; i++) buf[i] = name[i];
+    return 0;
+}
+
+int sys_tcflush(int fd, int queue) {
+    int result;
+    return sys_ioctl(fd, 0x540B /* TCFLSH */, reinterpret_cast<void *>(static_cast<long>(queue)), &result);
+}
+
+int sys_tcdrain(int) { return 0; }      // writes are synchronous
+
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

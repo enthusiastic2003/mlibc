@@ -16,6 +16,7 @@
 #include <sys/times.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
@@ -127,6 +128,20 @@
 #define SYS_FSYNC       88
 #define SYS_GETRANDOM   89
 #define SYS_YIELD       90
+#ifndef SYS_SOCKET
+#define SYS_SOCKET 99
+#define SYS_SOCKETPAIR 100
+#define SYS_BIND 101
+#define SYS_LISTEN 102
+#define SYS_ACCEPT 103
+#define SYS_CONNECT 104
+#define SYS_GETSOCKNAME 105
+#define SYS_GETPEERNAME 106
+#define SYS_SHUTDOWN 107
+#define SYS_SENDMSG 108
+#define SYS_RECVMSG 109
+#define SYS_SOCKOPT 110
+#endif
 #ifndef SYS_SIGSUSPEND
 #define SYS_SIGSUSPEND 94
 #define SYS_SIGPENDING 95
@@ -1231,6 +1246,97 @@ int sys_mknodat(int dirfd, const char *path, int mode, int dev) {
 
 int sys_mkfifoat(int dirfd, const char *path, mode_t mode) {
     return sys_mknodat(dirfd, path, (int)(mode & 07777) | 0010000, 0);
+}
+
+// ---- AF_UNIX sockets ----
+int sys_socket(int family, int type, int protocol, int *fd) {
+    long ret = syscall3(SYS_SOCKET, family, type, protocol);
+    if (ret < 0) return -ret;
+    *fd = (int)ret;
+    return 0;
+}
+
+int sys_socketpair(int domain, int type_and_flags, int proto, int *fds) {
+    long ret = syscall4(SYS_SOCKETPAIR, domain, type_and_flags, proto, (long)fds);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_bind(int fd, const struct sockaddr *addr, socklen_t len) {
+    long ret = syscall3(SYS_BIND, fd, (long)addr, len);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_listen(int fd, int backlog) {
+    long ret = syscall2(SYS_LISTEN, fd, backlog);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_connect(int fd, const struct sockaddr *addr, socklen_t len) {
+    long ret = cp_syscall3(SYS_CONNECT, fd, (long)addr, len);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_accept(int fd, int *newfd, struct sockaddr *addr, socklen_t *len, int flags) {
+    long ret = cp_syscall4(SYS_ACCEPT, fd, (long)addr, (long)len, flags);
+    if (ret < 0) return -ret;
+    *newfd = (int)ret;
+    return 0;
+}
+
+int sys_sockname(int fd, struct sockaddr *addr, socklen_t max, socklen_t *actual) {
+    socklen_t l = max;
+    long ret = syscall3(SYS_GETSOCKNAME, fd, (long)addr, (long)&l);
+    if (ret < 0) return -ret;
+    *actual = l;
+    return 0;
+}
+
+int sys_peername(int fd, struct sockaddr *addr, socklen_t max, socklen_t *actual) {
+    socklen_t l = max;
+    long ret = syscall3(SYS_GETPEERNAME, fd, (long)addr, (long)&l);
+    if (ret < 0) return -ret;
+    *actual = l;
+    return 0;
+}
+
+int sys_shutdown(int fd, int how) {
+    long ret = syscall2(SYS_SHUTDOWN, fd, how);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_msg_send(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
+    long ret = cp_syscall3(SYS_SENDMSG, fd, (long)hdr, flags);
+    if (ret < 0) return -ret;
+    *length = ret;
+    return 0;
+}
+
+int sys_msg_recv(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
+    long ret = cp_syscall3(SYS_RECVMSG, fd, (long)hdr, flags);
+    if (ret < 0) return -ret;
+    *length = ret;
+    return 0;
+}
+
+struct sockopt_request {
+    int32_t level, name;
+    uint64_t val;
+    uint64_t lenp;
+    int64_t set;
+};
+
+int sys_getsockopt(int fd, int layer, int number, void *__restrict buffer,
+                   socklen_t *__restrict size) {
+    sockopt_request r{layer, number, (uint64_t)buffer, (uint64_t)size, 0};
+    long ret = syscall2(SYS_SOCKOPT, fd, (long)&r);
+    return ret < 0 ? -ret : 0;
+}
+
+int sys_setsockopt(int fd, int layer, int number, const void *buffer, socklen_t size) {
+    socklen_t l = size;
+    sockopt_request r{layer, number, (uint64_t)buffer, (uint64_t)&l, 1};
+    long ret = syscall2(SYS_SOCKOPT, fd, (long)&r);
+    return ret < 0 ? -ret : 0;
 }
 
 int sys_isatty(int fd) {

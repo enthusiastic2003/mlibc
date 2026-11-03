@@ -154,6 +154,9 @@
 #define SYS_TIMERFD_GETTIME 117
 #define SYS_SIGNALFD 118
 #endif
+#ifndef SYS_SIGTIMEDWAIT
+#define SYS_SIGTIMEDWAIT 119
+#endif
 #ifndef SYS_SIGSUSPEND
 #define SYS_SIGSUSPEND 94
 #define SYS_SIGPENDING 95
@@ -1414,6 +1417,17 @@ int sys_signalfd_create(const sigset_t *mask, int flags, int *fd) {
     long ret = syscall3(SYS_SIGNALFD, *fd, (long)mask, flags);
     if (ret < 0) return -ret;
     *fd = (int)ret;
+    return 0;
+}
+
+int sys_sigtimedwait(const sigset_t *__restrict set, siginfo_t *__restrict info,
+                     const struct timespec *__restrict timeout, int *out_signal) {
+    long ns = -1;
+    if (timeout)
+        ns = (long)timeout->tv_sec * 1000000000L + timeout->tv_nsec;
+    long ret = cp_syscall3(SYS_SIGTIMEDWAIT, (long)set, (long)info, ns);
+    if (ret < 0) return -ret;
+    *out_signal = (int)ret;
     return 0;
 }
 

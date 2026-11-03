@@ -79,6 +79,7 @@ speed_t cfgetispeed(const struct termios *__tios);
 speed_t cfgetospeed(const struct termios *__tios);
 int cfsetispeed(struct termios *__tios, speed_t __speed);
 int cfsetospeed(struct termios *__tios, speed_t __speed);
+int cfsetspeed(struct termios *__tios, speed_t __speed);
 void cfmakeraw(struct termios *__tios);
 int tcdrain(int __fd);
 int tcflow(int __fd, int __action);

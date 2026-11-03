@@ -33,6 +33,11 @@ int cfsetospeed(struct termios *termios, speed_t speed) {
 	return 0;
 }
 
+int cfsetspeed(struct termios *termios, speed_t speed) {
+	/* One speed field serves both directions here. */
+	return cfsetospeed(termios, speed);
+}
+
 void cfmakeraw(struct termios *t) {
 	t->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
 	t->c_oflag &= ~OPOST;

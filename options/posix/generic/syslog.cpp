@@ -40,7 +40,7 @@ static void __openlog() {
 	if(log_fd >= 0) {
 		int ret = connect(log_fd, (const sockaddr *)&log_addr, sizeof log_addr);
 		if(ret) {
-			mlibc::infoLogger() << "\e[31mmlibc: syslog: connect returned an error, falling back to infoLogger\e[39m" << frg::endlog;
+			// No syslogd is listening: log to a file instead of the console.
 			use_mlibc_logger = 1;
 		}
 	}
@@ -93,8 +93,19 @@ static void _vsyslog(int priority, const char *message, va_list ap) {
 		__openlog();
 
 	if(use_mlibc_logger) {
+		char line[1100];
 		vsnprintf(buf, sizeof buf, message, ap);
-		mlibc::infoLogger() << "mlibc: syslog: " << buf << frg::endlog;
+		now = time(nullptr);
+		gmtime_r(&now, &tm);
+		strftime(timebuf, sizeof timebuf, "%b %e %T", &tm);
+		int n = snprintf(line, sizeof line, "%s %s[%d]: %s\n", timebuf, log_ident,
+				(int)getpid(), buf);
+		fd = open("/var/log/messages", O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOCTTY, 0644);
+		if(fd >= 0) {
+			if(n > 0)
+				(void)write(fd, line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+			close(fd);
+		}
 		return;
 	}
 

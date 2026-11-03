@@ -37,7 +37,7 @@ libc_include_dirs += include_directories('generic')
 libc_include_dirs += include_directories('include')
 
 if not no_headers
-    install_headers('include/sys/sysmacros.h', subdir: 'sys')
+    install_headers('include/sys/sysmacros.h', 'include/sys/syscall.h', subdir: 'sys')
     install_headers(
         'include/abi-bits/access.h',
         'include/abi-bits/auxv.h',

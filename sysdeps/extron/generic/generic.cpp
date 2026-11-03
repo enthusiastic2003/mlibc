@@ -18,6 +18,7 @@
 #include <sys/uio.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/sysinfo.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/statvfs.h>
@@ -153,6 +154,9 @@
 #define SYS_TIMERFD_SETTIME 116
 #define SYS_TIMERFD_GETTIME 117
 #define SYS_SIGNALFD 118
+#endif
+#ifndef SYS_SYSINFO
+#define SYS_SYSINFO 121
 #endif
 #ifndef SYS_GETSID
 #define SYS_GETSID 120
@@ -1421,6 +1425,11 @@ int sys_signalfd_create(const sigset_t *mask, int flags, int *fd) {
     if (ret < 0) return -ret;
     *fd = (int)ret;
     return 0;
+}
+
+int sys_sysinfo(struct sysinfo *info) {
+    long ret = syscall1(SYS_SYSINFO, (long)info);
+    return ret < 0 ? -ret : 0;
 }
 
 int sys_getsid(pid_t pid, pid_t *sid) {

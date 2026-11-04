@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <time.h>
 #include <wchar.h>
 #include <setjmp.h>
 #include <limits.h>
@@ -284,9 +285,28 @@ int system(const char *command) {
 	return status;
 }
 
-char *mktemp(char *) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+// mktemp(): only generates a name (inherently racy, which is why mkstemp is
+// preferred); bash still uses it for its FIFO-based process substitution.
+char *mktemp(char *pattern) {
+	static const char alphabet[] =
+			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	static uint64_t state;
+	size_t n = strlen(pattern);
+	if(n < 6 || strcmp(pattern + n - 6, "XXXXXX")) {
+		errno = EINVAL;
+		pattern[0] = '\0';
+		return pattern;
+	}
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	if(!state)
+		state = 0x9E3779B97F4A7C15ull;
+	state ^= (uint64_t(ts.tv_nsec) << 20) ^ uint64_t(ts.tv_sec) ^ uint64_t(uintptr_t(pattern));
+	for(size_t i = n - 6; i < n; i++) {
+		state ^= state << 13; state ^= state >> 7; state ^= state << 17;   // xorshift64
+		pattern[i] = alphabet[state % (sizeof(alphabet) - 1)];
+	}
+	return pattern;
 }
 
 void *bsearch(const void *key, const void *base, size_t count, size_t size,

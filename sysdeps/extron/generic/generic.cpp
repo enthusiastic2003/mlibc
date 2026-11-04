@@ -330,6 +330,16 @@ int sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
     long ret = syscall3(SYS_SETRESGID, rgid, egid, sgid);
     return ret < 0 ? -ret : 0;
 }
+// The kernel has no getres[ug]id: report the saved id as the effective one (the
+// saved ids only matter to setuid programs, which Extron does not run).
+int sys_getresuid(uid_t *ruid, uid_t *euid, uid_t *suid) {
+    *ruid = sys_getuid(); *euid = *suid = sys_geteuid();
+    return 0;
+}
+int sys_getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid) {
+    *rgid = sys_getgid(); *egid = *sgid = sys_getegid();
+    return 0;
+}
 int sys_getgroups(size_t size, gid_t *list, int *ret_count) {
     long ret = syscall2(SYS_GETGROUPS, size, (long)list);
     if (ret < 0) return -ret;

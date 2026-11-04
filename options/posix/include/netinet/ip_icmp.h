@@ -68,7 +68,12 @@ struct icmphdr {
 #define ICMP_EXC_TTL 0
 #define ICMP_EXC_FRAGTIME 1
 
+/* glibc's names for the ICMP message size limits */
+#define ICMP_MINLEN 8
+#define ICMP_TSLEN (8 + 3 * sizeof(uint32_t))
+#define ICMP_MASKLEN 12
 #define ICMP_ADVLENMIN (8 + sizeof(struct ip) + 8)
+#define ICMP_ADVLEN(p) (8 + ((p)->icmp_ip.ip_hl << 2) + 8)
 
 struct icmp_ra_addr {
 	uint32_t ira_addr;

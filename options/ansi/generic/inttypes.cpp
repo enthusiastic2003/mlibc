@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <bits/ensure.h>
+#include <mlibc/strtol.hpp>
 #include <mlibc/debug.hpp>
 
 static const char *__mlibc_digits = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -83,18 +84,18 @@ parse_digits:
 	return v;
 }
 
-intmax_t strtoimax(const char *it, char **out, int base) {
-	// TODO: This function has to check for overflow!
-	return strtoxmax<intmax_t>(it, out, base);
+// Use the same conversion as strtol()/strtoul(): signs, any base up to 36,
+// overflow clamping and errno. (The old hand-written strtoxmax() rejected '+',
+// panicked for bases above 10 and skipped spaces inside numbers.)
+intmax_t strtoimax(const char *__restrict it, char **__restrict out, int base) {
+	return mlibc::stringToInteger<intmax_t, char>(it, out, base);
 }
-uintmax_t strtoumax(const char *it, char **out, int base) {
-	return strtoxmax<uintmax_t>(it, out, base);
+uintmax_t strtoumax(const char *__restrict it, char **__restrict out, int base) {
+	return mlibc::stringToInteger<uintmax_t, char>(it, out, base);
 }
-intmax_t wcstoimax(const wchar_t *__restrict, wchar_t **__restrict, int) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+intmax_t wcstoimax(const wchar_t *__restrict it, wchar_t **__restrict out, int base) {
+	return mlibc::stringToInteger<intmax_t, wchar_t>(it, out, base);
 }
-uintmax_t wcstoumax(const wchar_t *__restrict, wchar_t **__restrict, int) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+uintmax_t wcstoumax(const wchar_t *__restrict it, wchar_t **__restrict out, int base) {
+	return mlibc::stringToInteger<uintmax_t, wchar_t>(it, out, base);
 }

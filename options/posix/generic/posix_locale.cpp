@@ -24,10 +24,7 @@ void freelocale(locale_t) {
 }
 
 locale_t uselocale(locale_t) {
-	if(!uselocale_seen) {
-		mlibc::infoLogger() << "mlibc: uselocale() is a no-op" << frg::endlog;
-		uselocale_seen = true;
-	}
+	uselocale_seen = true;
 	return nullptr;
 }
 

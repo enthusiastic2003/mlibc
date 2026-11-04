@@ -50,8 +50,7 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
 
 int posix_fadvise(int fd, off_t offset, off_t length, int advice) {
 	if(!mlibc::sys_fadvise) {
-		mlibc::infoLogger() << "mlibc: fadvise() ignored due to missing sysdep" << frg::endlog;
-		return 0;
+		return 0;    // advisory only
 	}
 
 	// posix_fadvise() returns an error instead of setting errno.
@@ -93,8 +92,9 @@ ssize_t splice(int in_fd, off_t *in_off, int out_fd, off_t *out_off, size_t size
 }
 
 ssize_t vmsplice(int, const struct iovec *, size_t, unsigned int) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+	// Callers (GNU yes/cat) fall back to write() on ENOSYS.
+	errno = ENOSYS;
+	return -1;
 }
 
 int open(const char *pathname, int flags, ...) {

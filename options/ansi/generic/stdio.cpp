@@ -1427,11 +1427,12 @@ size_t fwrite_unlocked(const void *buffer, size_t size, size_t count, FILE *file
 		size_t progress = 0;
 		while(progress < count) {
 			size_t chunk;
-			if(file->write((const char *)buffer + progress,
+			if(int werr = file->write((const char *)buffer + progress,
 					count - progress, &chunk)) {
-				// TODO: Handle I/O errors.
-				mlibc::infoLogger() << "mlibc: fwrite() I/O errors are not handled"
-						<< frg::endlog;
+				// Report the failure (EPIPE, ENOSPC, ...) instead of leaving a stale errno.
+				if(werr > 0)
+					errno = werr;
+				file_base->__status_bits |= __MLIBC_ERROR_BIT;
 				break;
 			}else if(!chunk) {
 				// TODO: Handle eof.
@@ -1447,11 +1448,11 @@ size_t fwrite_unlocked(const void *buffer, size_t size, size_t count, FILE *file
 			size_t progress = 0;
 			while(progress < size) {
 				size_t chunk;
-				if(file->write((const char *)buffer + i * size + progress,
+				if(int werr = file->write((const char *)buffer + i * size + progress,
 						size - progress, &chunk)) {
-					// TODO: Handle I/O errors.
-					mlibc::infoLogger() << "mlibc: fwrite() I/O errors are not handled"
-							<< frg::endlog;
+					if(werr > 0)
+						errno = werr;
+					file_base->__status_bits |= __MLIBC_ERROR_BIT;
 					break;
 				}else if(!chunk) {
 					// TODO: Handle eof.

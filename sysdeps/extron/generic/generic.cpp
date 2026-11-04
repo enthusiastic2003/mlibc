@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <signal.h>
+#include <sched.h>
 #include <string.h>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -1500,6 +1501,14 @@ int sys_thread_getname(void *tcb, char *name, size_t size) {
     while (found[n]) n++;
     if (n + 1 > size) return ERANGE;
     for (size_t i = 0; i <= n; i++) name[i] = found[i];
+    return 0;
+}
+
+// One CPU: the kernel is uniprocessor, so every process may run on CPU 0 only.
+int sys_getaffinity(pid_t, size_t cpusetsize, cpu_set_t *mask) {
+    if (cpusetsize == 0) return EINVAL;
+    memset(mask, 0, cpusetsize);
+    *(unsigned char *)mask = 1;
     return 0;
 }
 

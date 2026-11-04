@@ -173,7 +173,8 @@
 #endif
 
 
-using main_fn = int (*)(int, char **);
+using main_fn = int (*)(int, char **, char **);
+extern "C" char **environ;
 
 struct path_at_request {
     uint64_t op;
@@ -255,7 +256,9 @@ extern "C" void __mlibc_start_main(uintptr_t *sp, main_fn program_main) {
      */
     __dlapi_enter(sp);
 
-    auto ret = program_main(mlibc::entry_stack.argc, mlibc::entry_stack.argv);
+    // envp too: programs like bash read their environment from main()'s third
+    // argument, not from environ.
+    auto ret = program_main(mlibc::entry_stack.argc, mlibc::entry_stack.argv, environ);
     /* exit(), not mlibc::sys_exit() directly: exit() is what runs the
      * atexit chain (__mlibc_do_finalize(), options/ansi/generic/
      * stdlib.cpp) — __dlapi_enter() already wired the real

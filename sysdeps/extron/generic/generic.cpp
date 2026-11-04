@@ -1503,6 +1503,22 @@ int sys_thread_getname(void *tcb, char *name, size_t size) {
     return 0;
 }
 
+// prctl(): the kernel has no process attributes behind it, so accept the few
+// harmless requests programs make routinely (GNU coreutils' multi-call binary
+// names itself with PR_SET_NAME on every start) and reject the rest.
+int sys_prctl(int option, va_list, int *out) {
+    switch (option) {
+    case 1:  // PR_SET_PDEATHSIG
+    case 4:  // PR_SET_DUMPABLE
+    case 15: // PR_SET_NAME
+        *out = 0; return 0;
+    case 3:  // PR_GET_DUMPABLE
+        *out = 1; return 0;
+    default:
+        return EINVAL;
+    }
+}
+
 // Extended attributes: the filesystems here have none. EOPNOTSUPP is what
 // callers such as Python's shutil.copystat() expect and ignore.
 int sys_listxattr(const char *, char *, size_t, ssize_t *) { return EOPNOTSUPP; }

@@ -1579,32 +1579,6 @@ int sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count, ssize_t *ou
     return 0;
 }
 
-// splice(): a user-space copy through a bounce buffer (the kernel has no
-// zero-copy path). GNU cat/yes use it and fall back to read/write on ENOSYS,
-// but a real copy is simpler than relying on that.
-int sys_splice(int in_fd, off_t *in_off, int out_fd, off_t *out_off,
-               size_t size, unsigned int, ssize_t *out) {
-    char buf[16384];
-    size_t want = size > sizeof(buf) ? sizeof(buf) : size;
-    ssize_t got;
-    int e = in_off ? sys_pread(in_fd, buf, want, *in_off, &got)
-                   : sys_read(in_fd, buf, want, &got);
-    if (e) return e;
-    ssize_t done = 0;
-    while (done < got) {
-        ssize_t wrote;
-        e = out_off ? sys_pwrite(out_fd, buf + done, static_cast<size_t>(got - done),
-                                 *out_off + done, &wrote)
-                    : sys_write(out_fd, buf + done, static_cast<size_t>(got - done), &wrote);
-        if (e) return e;
-        done += wrote;
-    }
-    if (in_off) *in_off += got;
-    if (out_off) *out_off += got;
-    *out = got;
-    return 0;
-}
-
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

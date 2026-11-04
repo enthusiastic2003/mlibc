@@ -82,7 +82,11 @@ int open_by_handle_at(int, struct file_handle *, int) {
 }
 
 ssize_t splice(int in_fd, off_t *in_off, int out_fd, off_t *out_off, size_t size, unsigned int flags) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_splice, -1);
+	if(!mlibc::sys_splice) {
+		// Optional fast path: callers (GNU cat) fall back to read/write.
+		errno = ENOSYS;
+		return -1;
+	}
 	ssize_t ret;
 	if(int e = mlibc::sys_splice(in_fd, in_off, out_fd, out_off, size, flags, &ret); e) {
 		errno = e;

@@ -1380,8 +1380,12 @@ size_t fread_unlocked(void *buffer, size_t size, size_t count, FILE *file_base) 
 			size_t chunk;
 			if(int e = file->read((char *)buffer + progress,
 					count - progress, &chunk)) {
+				// A short count, as the C standard says: the bytes already copied
+				// into the caller's buffer were read for real and must be reported.
+				// (Returning 0 here dropped them: a non-blocking stream that runs
+				// dry mid-fread() -- BusyBox wget on a socket -- lost whole chunks.)
 				errno = e;
-				return 0;
+				return progress;
 			}else if(!chunk) {
 				// TODO: Handle eof.
 				break;
@@ -1399,7 +1403,7 @@ size_t fread_unlocked(void *buffer, size_t size, size_t count, FILE *file_base) 
 				if(int e = file->read((char *)buffer + i * size + progress,
 						size - progress, &chunk)) {
 					errno = e;
-					return 0;
+					return i;          // the items completed so far
 				}else if(!chunk) {
 					// TODO: Handle eof.
 					break;

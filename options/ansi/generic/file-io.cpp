@@ -611,8 +611,8 @@ namespace {
 			// Only flush the files but do not close them.
 			for(auto it : mlibc::global_file_list()) {
 				if(int e = it->flush(); e)
-					mlibc::infoLogger() << "mlibc warning: Failed to flush file before exit()"
-							<< frg::endlog;
+					mlibc::infoLogger() << "mlibc warning: Failed to flush file before exit(): error "
+							<< e << frg::endlog;
 			}
 		}
 	} global_stdio_guard;

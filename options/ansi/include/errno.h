@@ -9,11 +9,17 @@ extern "C" {
 
 #ifndef __MLIBC_ABI_ONLY
 
+int *__errno_location(void);
+
 /* Some programs define their own errno as an "extern int" if it is not a macro. */
+#if defined(__TINYC__)
+/* tcc's linker cannot import a thread-local variable from a shared library, so tcc-built
+ * programs reach errno through the (exported) function that returns its address. */
+#define errno (*__errno_location())
+#else
 #define errno __mlibc_errno
 extern __thread int __mlibc_errno;
-
-int *__errno_location(void);
+#endif
 
 /* Linux extensions. */
 

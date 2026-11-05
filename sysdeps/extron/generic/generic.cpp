@@ -1595,8 +1595,6 @@ int sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count, ssize_t *ou
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);
-    if (ret == -EBADF)
-        return EBADF;               /* closed descriptor: not "not a tty" */
     return ret < 0 ? ENOTTY : 0;
 }
 

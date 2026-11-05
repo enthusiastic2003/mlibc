@@ -390,7 +390,13 @@ int abstract_file::_save_pos() {
 	if (_type == stream_type::file_like && _bufmode != buffer_mode::no_buffer) {
 		off_t new_offset;
 		auto seek_offset = (off_t(__offset) - off_t(__io_offset));
+		// Nothing buffered beyond the OS position: no seek (and so no error to report
+		// for a descriptor the program already closed behind our back).
+		if (seek_offset == 0)
+			return 0;
 		if (int e = io_seek(seek_offset, SEEK_CUR, &new_offset); e) {
+			if (e == EBADF)          // closed by the program itself, e.g. close(0) at exit
+				return 0;
 			// The descriptor can stop being seekable after the type was
 			// cached (a shell dup2()s a pipe over fd 0/1 in a forked child
 			// whose stdio objects were already classified). That is not an

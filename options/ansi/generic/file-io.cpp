@@ -382,6 +382,11 @@ int abstract_file::_write_back() {
 }
 
 int abstract_file::_save_pos() {
+	// Nothing buffered beyond the OS position: there is nothing to restore, so do not
+	// touch the descriptor at all (the program may have close()d it already, as
+	// BusyBox's xzcat/bzcat do with stdout before exiting).
+	if (__offset == __io_offset)
+		return 0;
 	if (int e = _init_type(); e)
 		return e;
 	if (int e = _init_bufmode(); e)

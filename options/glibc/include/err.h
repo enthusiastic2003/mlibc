@@ -18,7 +18,7 @@ __attribute__((__noreturn__, __format__(__printf__, 2, 3)))
 void err(int __errnum, const char *__format, ...);
 __attribute__((__noreturn__, __format__(__printf__, 2, 0)))
 void verr(int __errnum, const char *__format, va_list __args);
-__attribute__((__noreturn__, , __format__(__printf__, 2, 3)))
+__attribute__((__noreturn__, __format__(__printf__, 2, 3)))
 void errx(int __errnum, const char *__format, ...);
 __attribute__((__noreturn__, __format__(__printf__, 2, 0)))
 void verrx(int __errnum, const char *__format, va_list __args);

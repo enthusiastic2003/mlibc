@@ -241,8 +241,34 @@ int getnameinfo(const struct sockaddr *__restrict addr, socklen_t addr_len,
 	}
 
 	if (serv && serv_len) {
-		__ensure("getnameinfo(): not implemented service resolution yet!");
-		__builtin_unreachable();
+		uint16_t port_be = 0;
+		if (family == AF_INET)
+			port_be = reinterpret_cast<const struct sockaddr_in *>(addr)->sin_port;
+		else
+			port_be = reinterpret_cast<const struct sockaddr_in6 *>(addr)->sin6_port;
+
+		const char *name = nullptr;
+		if (!(flags & NI_NUMERICSERV)) {
+			if (auto *se = getservbyport(port_be, (flags & NI_DGRAM) ? "udp" : "tcp"); se)
+				name = se->s_name;
+		}
+
+		char numeric[8];
+		if (!name) {
+			unsigned port = ntohs(port_be);
+			int n = 0;
+			char tmp[6];
+			do { tmp[n++] = char('0' + port % 10); port /= 10; } while (port);
+			for (int i = 0; i < n; i++)
+				numeric[i] = tmp[n - 1 - i];
+			numeric[n] = 0;
+			name = numeric;
+		}
+
+		size_t len = strlen(name);
+		if (len + 1 > serv_len)
+			return EAI_OVERFLOW;
+		memcpy(serv, name, len + 1);
 	}
 
 	return 0;

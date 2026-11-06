@@ -1592,6 +1592,13 @@ int sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count, ssize_t *ou
     return 0;
 }
 
+// AI_ADDRCONFIG: the stack speaks IPv4 only (loopback always, plus DHCP on the NIC).
+int sys_inet_configured(bool *ipv4, bool *ipv6) {
+    *ipv4 = true;
+    *ipv6 = false;
+    return 0;
+}
+
 int sys_isatty(int fd) {
     struct termios termios;
     long ret = syscall3(SYS_IOCTL, fd, TCGETS, (long)&termios);

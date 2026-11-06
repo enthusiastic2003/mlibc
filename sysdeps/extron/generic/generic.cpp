@@ -1487,6 +1487,15 @@ int sys_tcflush(int fd, int queue) {
 
 int sys_tcdrain(int) { return 0; }      // writes are synchronous
 
+// The tty layer has no output flow-control state (writes never stall on XOFF), so suspending and
+// resuming output or input are accepted no-ops on a terminal. readline calls tcflow(TCOON) ("simulate
+// a ^Q") whenever a signal interrupts it, so refusing this killed bash on ^C.
+int sys_tcflow(int fd, int action) {
+    if (action < 0 || action > 3)           // TCOOFF, TCOON, TCIOFF, TCION
+        return EINVAL;
+    return sys_isatty(fd) == 0 ? 0 : ENOTTY;
+}
+
 // Thread names (pthread_setname_np/getname_np). The kernel has no per-thread name
 // field, so they live in a small table in the process: enough for the library
 // calls that set a name for debugging (CPython's threading module does).

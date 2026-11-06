@@ -38,12 +38,14 @@ void parse_exec_stack(void *opaque_sp, exec_stack_data *data) {
 void set_startup_data(int argc, char **argv, char **envp) {
 	if(argc) {
 		program_invocation_name = argv[0];
+		__progname_full = argv[0];
 
 		if(auto slash = strrchr(argv[0], '/'); slash) {
 			program_invocation_short_name = slash + 1;
 		}else{
 			program_invocation_short_name = argv[0];
 		}
+		__progname = program_invocation_short_name;
 	}
 
 	// Initialize environ.

@@ -295,9 +295,16 @@ int setgroups(size_t size, const gid_t *list) {
 	return 0;
 }
 
-int initgroups(const char *, gid_t) {
-	mlibc::infoLogger() << "mlibc: initgroups is a stub" << frg::endlog;
-	return 0;
+int initgroups(const char *user, gid_t gid) {
+	// The user's primary group plus every group in /etc/group that lists them as a member.
+	gid_t groups[256];
+	int n = 256;
+	if(getgrouplist(user, gid, groups, &n) < 0) {
+		if(n <= 256)
+			return -1;                    // a real error (errno set), not just "too many"
+		n = 256;                          // more memberships than we keep: use the first 256
+	}
+	return setgroups(static_cast<size_t>(n), groups);
 }
 
 int putgrent(const struct group *g, FILE *f) {

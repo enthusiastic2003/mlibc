@@ -1730,6 +1730,11 @@ frg::optional<ObjectSymbol> resolveInObject(SharedObject *object, frg::string_vi
 		// use the default one.
 		if(version->isGlobal() && !candVersion.isGlobal() && !candVersion.isLocal() && candVersion.isDefault())
 			return true;
+		// An unversioned reference also binds to an unversioned definition that the
+		// defining object's linker marked "local" in .gnu.version (an executable's
+		// copy-relocated data, e.g. __progname, in a program linking a versioned library).
+		if(version->isGlobal() && candVersion.isLocal())
+			return true;
 		return *version == candVersion;
 	};
 

@@ -1240,6 +1240,13 @@ void processLateRelocation(Relocation rel) {
 	if(rel.symbol_index()) {
 		auto [sym, ver] = rel.object()->getSymbolByIndex(rel.symbol_index());
 
+		// A copy-relocated symbol is *defined* in the executable's .dynsym. When the
+		// executable also links a versioned library (e.g. libcrypto), its .gnu.version
+		// marks that definition "local", which would never match the (unversioned)
+		// definition in libc: look it up as an ordinary unversioned reference.
+		if(rel.type() == R_COPY && ver.isLocal())
+			ver = SymbolVersion{1};
+
 		p = Scope::resolveGlobalOrLocal(*globalScope, rel.object()->localScope,
 				sym.getString(), rel.object()->objectRts, Scope::resolveCopy, ver);
 	}
